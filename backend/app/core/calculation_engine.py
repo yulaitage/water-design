@@ -19,7 +19,7 @@ class CalculationEngine:
 
     # 内置函数
     FUNCTIONS: Dict[str, Callable] = {
-        "sqrt": lambda x: x ** 0.5 if x >= 0 else None,
+        "sqrt": lambda x: x ** 0.5 if x >= 0 else float('nan'),
         "abs": abs,
         "max": max,
         "min": min,
@@ -38,6 +38,31 @@ class CalculationEngine:
     def __init__(self, custom_constants: Optional[Dict[str, float]] = None):
         self.constants = {**self.DEFAULT_CONSTANTS, **(custom_constants or {})}
 
+    def _substitute_variables(self, formula: str, context: CalculationContext) -> str:
+        """替换变量名为值，按长度降序排列避免子串冲突"""
+        expr = formula
+        # 按长度降序排列key，避免子串冲突（如 "ab" 不会被 "a" 先替换）
+        all_keys = sorted(
+            list(context.design_params.keys()) + list(self.constants.keys()),
+            key=len,
+            reverse=True
+        )
+        for key in all_keys:
+            if key in context.design_params:
+                value = context.design_params[key]
+            else:
+                value = self.constants[key]
+            expr = re.sub(rf'\b{key}\b', str(value), expr)
+        return expr
+
+    def _validate_expression(self, expr: str) -> bool:
+        """验证表达式仅包含允许的字符"""
+        # 允许：数字、运算符、括号、点号、函数名字母
+        allowed_pattern = r'^[\d\s+\-*/().sqrtabsilpmaxeSQRTABSMAXMINPOW]+$'
+        if not re.match(allowed_pattern, expr.replace('_', '')):
+            return False
+        return True
+
     def evaluate(self, formula: str, context: CalculationContext) -> Optional[float]:
         """
         计算公式值
@@ -50,23 +75,17 @@ class CalculationEngine:
             计算结果，失败返回None
         """
         try:
-            # 替换变量名为值
-            expr = formula
-            for key in context.design_params:
-                expr = re.sub(rf'\b{key}\b', str(context.design_params[key]), expr)
+            expr = self._substitute_variables(formula, context)
 
-            for key, value in self.constants.items():
-                expr = re.sub(rf'\b{key}\b', str(value), expr)
-
-            # 安全评估（仅允许数字和运算符）
-            if not re.match(r'^[\d\s+\-*/().sqrtabsilpmaxe]+$', expr.replace('_', '')):
+            if not self._validate_expression(expr):
                 return None
 
-            # 使用eval计算（仅含数字和运算符，无任何函数）
             result = eval(expr, {"__builtins__": {}}, {})
+            if isinstance(result, float) and not result.is_finite():
+                return None
             return float(result)
 
-        except (ValueError, SyntaxError, ZeroDivisionError, NameError):
+        except (ValueError, SyntaxError, ZeroDivisionError, NameError, TypeError, AttributeError):
             return None
 
     def evaluate_with_functions(self, formula: str, context: CalculationContext) -> Optional[float]:
@@ -76,24 +95,20 @@ class CalculationEngine:
         Args:
             formula: 公式字符串，如 "sqrt(length**2 + height**2)"
             context: 计算上下文
+
+        Returns:
+            计算结果，失败返回None
         """
         try:
-            expr = formula
-            # 替换变量
-            for key in context.design_params:
-                expr = re.sub(rf'\b{key}\b', str(context.design_params[key]), expr)
+            expr = self._substitute_variables(formula, context)
 
-            for key, value in self.constants.items():
-                expr = re.sub(rf'\b{key}\b', str(value), expr)
-
-            # 预处理函数
-            for name, func in self.FUNCTIONS.items():
-                if name in expr:
-                    # 简单实现，实际可用ast解析
-                    pass
+            if not self._validate_expression(expr):
+                return None
 
             result = eval(expr, {"__builtins__": {}}, {**self.FUNCTIONS})
+            if isinstance(result, float) and not result.is_finite():
+                return None
             return float(result)
 
-        except Exception:
+        except (ValueError, SyntaxError, ZeroDivisionError, NameError, TypeError, AttributeError):
             return None
