@@ -1,4 +1,5 @@
 import re
+import math
 from typing import Dict, Any, Callable, Optional
 from dataclasses import dataclass
 
@@ -43,15 +44,17 @@ class CalculationEngine:
         expr = formula
         # 按长度降序排列key，避免子串冲突（如 "ab" 不会被 "a" 先替换）
         all_keys = sorted(
-            list(context.design_params.keys()) + list(self.constants.keys()),
+            list(context.design_params.keys()) + list(self.constants.keys()) + list(context.constants.keys()),
             key=len,
             reverse=True
         )
         for key in all_keys:
             if key in context.design_params:
                 value = context.design_params[key]
-            else:
+            elif key in self.constants:
                 value = self.constants[key]
+            else:
+                value = context.constants[key]
             expr = re.sub(rf'\b{key}\b', str(value), expr)
         return expr
 
@@ -81,7 +84,7 @@ class CalculationEngine:
                 return None
 
             result = eval(expr, {"__builtins__": {}}, {})
-            if isinstance(result, float) and not result.is_finite():
+            if isinstance(result, float) and not math.isfinite(result):
                 return None
             return float(result)
 
@@ -106,7 +109,7 @@ class CalculationEngine:
                 return None
 
             result = eval(expr, {"__builtins__": {}}, {**self.FUNCTIONS})
-            if isinstance(result, float) and not result.is_finite():
+            if isinstance(result, float) and not math.isfinite(result):
                 return None
             return float(result)
 
