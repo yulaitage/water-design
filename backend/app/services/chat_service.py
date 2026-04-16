@@ -19,12 +19,19 @@ class ChatService:
         orchestrator = AgentOrchestrator(self.db)
         return await orchestrator.process(request)
 
-    async def get_history(self, project_id: uuid.UUID) -> List[ConversationHistoryResponse]:
-        """获取项目对话历史"""
+    async def get_history(
+        self,
+        project_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[ConversationHistoryResponse]:
+        """获取项目对话历史（带分页）"""
         result = await self.db.execute(
             select(Conversation)
             .where(Conversation.project_id == project_id)
             .order_by(Conversation.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
         conversations = result.scalars().all()
 
