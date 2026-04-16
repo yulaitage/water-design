@@ -12,6 +12,7 @@ class CostEstimate(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True)
+    project_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "堤防" | "河道整治"
     version: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # "draft" | "confirmed"
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
@@ -8,7 +8,7 @@ class UnitPriceCreateRequest(BaseModel):
     """创建单价请求"""
     item_name: str
     unit: str
-    price: float
+    price: float = Field(..., ge=0, description="单价必须大于等于0")
     region: Optional[str] = None
     year: Optional[int] = None
     source: str = "user_import"

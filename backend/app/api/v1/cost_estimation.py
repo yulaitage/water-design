@@ -31,6 +31,7 @@ async def create_cost_estimate(
     return CostEstimateResponse(
         id=estimate.id,
         project_id=estimate.project_id,
+        project_type=estimate.project_type,
         version=estimate.version,
         status=estimate.status,
         design_params=estimate.design_params,
@@ -56,6 +57,7 @@ async def list_cost_estimates(
             CostEstimateResponse(
                 id=e.id,
                 project_id=e.project_id,
+                project_type=e.project_type,
                 version=e.version,
                 status=e.status,
                 design_params=e.design_params,
@@ -87,6 +89,7 @@ async def get_cost_estimate(
     return CostEstimateResponse(
         id=estimate.id,
         project_id=estimate.project_id,
+        project_type=estimate.project_type,
         version=estimate.version,
         status=estimate.status,
         design_params=estimate.design_params,
@@ -114,7 +117,7 @@ async def recalculate_cost_estimate(
     # 使用相同参数重新计算
     request = CostEstimateCreateRequest(
         project_id=project_id,
-        project_type="堤防",
+        project_type=old_estimate.project_type,
         design_params=old_estimate.design_params
     )
     new_estimate = await service.calculate(request)
@@ -122,6 +125,7 @@ async def recalculate_cost_estimate(
     return CostEstimateResponse(
         id=new_estimate.id,
         project_id=new_estimate.project_id,
+        project_type=new_estimate.project_type,
         version=new_estimate.version,
         status=new_estimate.status,
         design_params=new_estimate.design_params,

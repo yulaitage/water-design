@@ -39,6 +39,7 @@ class CostEstimateResponse(BaseModel):
     """估算响应"""
     id: UUID
     project_id: UUID
+    project_type: str
     version: int
     status: str
     design_params: Dict[str, float]

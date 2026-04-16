@@ -94,6 +94,7 @@ class CostCalculationService:
         # 6. 保存结果
         estimate = CostEstimate(
             project_id=request.project_id,
+            project_type=request.project_type,
             version=1,
             status="draft",
             design_params=request.design_params,
