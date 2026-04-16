@@ -1,10 +1,11 @@
 import uuid
-from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone
+from typing import Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation
 from app.services.intent_detection import IntentDetectionService, Intent
-from app.schemas.chat import ChatRequest, ChatResponse, Message
+from app.schemas.chat import ChatRequest, ChatResponse
 
 
 class AgentOrchestrator:
@@ -13,11 +14,6 @@ class AgentOrchestrator:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.intent_service = IntentDetectionService()
-        self._tool_handlers: Dict[str, Any] = {}
-
-    def register_tool(self, name: str, handler: Any) -> None:
-        """注册工具处理器"""
-        self._tool_handlers[name] = handler
 
     async def process(self, request: ChatRequest) -> ChatResponse:
         """
@@ -61,6 +57,10 @@ class AgentOrchestrator:
                 tool_calls.append(result["tool_call"])
         elif intent == Intent.TERRAIN_UPLOAD:
             reply_content = "请上传地形文件，我会帮您解析并提取地形特征。"
+        elif intent == Intent.PROJECT_CREATE:
+            reply_content = "我将为您创建一个新项目，请提供项目名称和类型。"
+        elif intent == Intent.CAD_GENERATE:
+            reply_content = "正在为您生成CAD图纸，请稍候..."
         elif intent == Intent.GENERAL_CHAT:
             reply_content = await self._handle_general_chat(request.message, context)
 
@@ -106,17 +106,16 @@ class AgentOrchestrator:
         tool_calls: List[Dict[str, Any]]
     ) -> None:
         """追加消息到对话历史"""
-        from datetime import datetime
         conversation.messages.append({
             "role": "user",
             "content": user_message,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "tool_calls": []
         })
         conversation.messages.append({
             "role": "assistant",
             "content": assistant_message,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "tool_calls": tool_calls
         })
         await self.db.commit()
