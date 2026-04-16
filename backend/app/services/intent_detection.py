@@ -1,4 +1,5 @@
-from typing import Optional, List, Dict, Any
+import re
+from typing import List, Dict, Any
 from enum import Enum
 
 
@@ -51,9 +52,8 @@ class IntentDetectionService:
         """
         params = {}
 
-        # 提取数字参数
-        import re
-        numbers = re.findall(r'[\d.]+', user_input)
+        # 提取数字参数（严格的数字格式）
+        numbers = re.findall(r'\d+(?:\.\d+)?', user_input)
         if numbers:
             params["numbers"] = [float(n) for n in numbers]
 
