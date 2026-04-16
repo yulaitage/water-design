@@ -20,7 +20,7 @@ class CostCalculationService:
         self.engine = CalculationEngine()
 
     async def calculate(
-        self, project_id: uuid.UUID, request: CostEstimateCreateRequest
+        self, request: CostEstimateCreateRequest
     ) -> CostEstimate:
         """
         执行工程量计算
@@ -69,8 +69,7 @@ class CostCalculationService:
             if rule.item_category not in summary_map:
                 summary_map[rule.item_category] = {
                     "total_quantity": 0.0,
-                    "total_amount": 0.0,
-                    "unit": rule.unit
+                    "total_amount": 0.0
                 }
             summary_map[rule.item_category]["total_quantity"] += quantity
             summary_map[rule.item_category]["total_amount"] += subtotal
@@ -94,7 +93,7 @@ class CostCalculationService:
 
         # 6. 保存结果
         estimate = CostEstimate(
-            project_id=project_id,
+            project_id=request.project_id,
             version=1,
             status="draft",
             design_params=request.design_params,
