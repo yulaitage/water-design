@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, DateTime, Text, ForeignKey, Numeric
+from sqlalchemy import String, Integer, DateTime, ForeignKey, Numeric
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
 
@@ -29,8 +29,8 @@ class CostEstimate(Base):
     cost_per_km: Mapped[float] = mapped_column(Numeric(10, 2), nullable=True)  # 万元/km
 
     # 输出文件路径
-    output_excel_path: Mapped[String] = mapped_column(String(500), nullable=True)
-    output_word_path: Mapped[String] = mapped_column(String(500), nullable=True)
+    output_excel_path: Mapped[str] = mapped_column(String(500), nullable=True)
+    output_word_path: Mapped[str] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
