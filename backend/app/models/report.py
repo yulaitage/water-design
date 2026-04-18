@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from app.core.utils import utc_now
 from sqlalchemy import String, Text, DateTime, Integer, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -20,8 +21,8 @@ class ReportTask(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
     current_chapter: Mapped[str] = mapped_column(String(100), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     revisions: Mapped[list["ReportRevision"]] = relationship(back_populates="report_task")
 
@@ -40,6 +41,6 @@ class ReportRevision(Base):
     user_input: Mapped[str] = mapped_column(Text, nullable=True)           # 原始修改意见
     modified_chapters: Mapped[list] = mapped_column(JSONB, default=[])     # 被修改的章节
     ai_interpretation: Mapped[str] = mapped_column(Text, nullable=True)    # AI理解
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     report_task: Mapped["ReportTask"] = relationship(back_populates="revisions")

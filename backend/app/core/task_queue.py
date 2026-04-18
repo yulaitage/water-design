@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from typing import Dict, Callable, Any, Optional
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -22,7 +22,7 @@ class Task:
     current_step: str = ""
     result: Any = None
     error: Optional[str] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=datetime.now(timezone.utc))
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
@@ -61,9 +61,9 @@ class TaskQueue:
         if status is not None:
             task.status = status
             if status == TaskStatus.RUNNING:
-                task.started_at = datetime.utcnow()
+                task.started_at = datetime.now(timezone.utc)()
             elif status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(timezone.utc)()
 
         if progress is not None:
             task.progress = progress

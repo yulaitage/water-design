@@ -2,7 +2,7 @@ import ezdxf
 from pathlib import Path
 from typing import Iterator, Dict, Any, Optional, List, Set
 from app.services.parsers.base import BaseParser
-from app.core.exceptions import FileCorruptedException, NoFeatureExtractedException
+from app.core.exceptions import FileCorruptedException
 
 
 class DXFParser(BaseParser):
@@ -20,7 +20,7 @@ class DXFParser(BaseParser):
     def validate(self) -> bool:
         """验证DXF文件"""
         try:
-            doc = ezdxf.readfile(str(self.file_path))
+            ezdxf.readfile(str(self.file_path))
             return True
         except Exception as e:
             raise FileCorruptedException(file_type="DXF", error=str(e))

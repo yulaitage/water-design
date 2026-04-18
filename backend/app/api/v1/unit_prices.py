@@ -1,8 +1,6 @@
-import uuid
-from typing import List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.db.database import get_db
 from app.models.unit_price import UnitPrice
@@ -91,17 +89,22 @@ async def list_unit_prices(
     db: AsyncSession = Depends(get_db)
 ):
     """获取单价列表"""
-    query = select(UnitPrice)
+    base_query = select(UnitPrice)
+    count_query = select(func.count(UnitPrice.id))
 
     if item_name:
-        query = query.where(UnitPrice.item_name.contains(item_name))
+        base_query = base_query.where(UnitPrice.item_name.contains(item_name))
+        count_query = count_query.where(UnitPrice.item_name.contains(item_name))
     if region:
-        query = query.where(UnitPrice.region == region)
+        base_query = base_query.where(UnitPrice.region == region)
+        count_query = count_query.where(UnitPrice.region == region)
 
-    query = query.order_by(UnitPrice.year.desc()).limit(limit)
+    base_query = base_query.order_by(UnitPrice.year.desc()).limit(limit)
 
-    result = await db.execute(query)
+    result = await db.execute(base_query)
+    count_result = await db.execute(count_query)
     items = result.scalars().all()
+    total = count_result.scalar() or 0
 
     return UnitPriceListResponse(
         items=[
@@ -117,5 +120,5 @@ async def list_unit_prices(
             )
             for u in items
         ],
-        total=len(items)
+        total=total,
     )

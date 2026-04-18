@@ -1,12 +1,9 @@
-import os
 from pathlib import Path
 from typing import Dict, Any
 from docx import Document
-from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from jinja2 import Template
 
-from app.core.report_exceptions import TemplateNotFoundException
 
 
 class TemplateService:
@@ -35,7 +32,7 @@ class TemplateService:
         context: Dict[str, Any]
     ) -> str:
         """渲染单个章节"""
-        t = Template(template)
+        t = Template(template, autoescape=True)
         return t.render(
             chapter_num=chapter_num,
             chapter=chapter_num,

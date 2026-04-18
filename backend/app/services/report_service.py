@@ -1,24 +1,25 @@
+import logging
 import uuid
-import os
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from app.models.report import ReportTask, ReportRevision
 from app.models.specification import Specification
-from app.models.case import Case
 from app.schemas.report import ReportCreateRequest, RevisionRequest, ProjectInfo
 from app.services.retrieval_service import RetrievalService
 from app.services.template_service import TemplateService
 from app.core.task_queue import task_queue, TaskStatus
 from app.core.report_exceptions import (
     KnowledgeBaseEmptyException,
-    TemplateNotFoundException,
     GenerationFailedException,
     InvalidRevisionException
 )
+
+_current_project_id: ContextVar[uuid.UUID] = ContextVar("_current_project_id")
+logger = logging.getLogger(__name__)
 
 
 class ReportService:
@@ -110,6 +111,9 @@ class ReportService:
             )
             await self._update_task_status(task, progress=20, current_chapter="开始生成")
 
+            # 设置当前项目ID供章节生成使用
+            _current_project_id.set(task.project_id)
+
             # 按章节生成
             chapters = {}
             total_chapters = len(self.CHAPTER_ORDER)
@@ -186,8 +190,7 @@ class ReportService:
                 location=project_info.location
             )
         except Exception as e:
-            # 检索失败不阻塞，使用空结果
-            pass
+            logger.warning("Knowledge retrieval failed, continuing with empty results: %s", e)
 
         return specs, cases
 
@@ -210,46 +213,61 @@ class ReportService:
         cases: List[dict],
         project_info: ProjectInfo
     ) -> str:
-        """生成单个章节内容"""
-        # 简化：实际需要调用LLM生成
-        # 这里返回占位内容
-        if chapter_num == "1":
-            return f"""
-### {chapter_name}.1 项目背景
-{project_info.description}
+        """生成单个章节内容（使用 LLM）"""
+        from app.core.llm import get_llm
+        from app.prompts.report_prompts import CHAPTER_PROMPTS
 
-### {chapter_name}.2 编制依据
-本报告编制依据国家和行业现行标准规范。
+        template = CHAPTER_PROMPTS.get(chapter_name)
+        if not template:
+            return f"{project_info.name}的{chapter_name}内容。\n参考案例：{cases[0]['name'] if cases else '无'}"
 
-### {chapter_name}.3 工程范围
-{project_info.scale}
-"""
-        elif chapter_num == "2":
-            return f"""
-### {chapter_name}.1 项目由来
-{project_info.name}已经纳入省级水利发展规划。
+        specs_text = "\n".join([s["content"][:300] for s in specs[:3]]) if specs else "暂无参考规范"
+        cases_text = "\n".join([c.get("summary", c.get("name", ""))[:200] for c in cases[:2]]) if cases else "暂无参考案例"
 
-### {chapter_name}.2 现状存在的主要问题
-经现场调查，现状河道存在行洪能力不足、堤防渗漏等问题。
+        terrain_info = ""
+        cost_data = ""
 
-### {chapter_name}.3 项目建设的必要性
-项目建设是保障区域防洪安全的需要。
-"""
-        elif chapter_num == "3":
-            specs_text = "\n".join([s["content"][:200] for s in specs[:3]]) if specs else "（参考规范待填充）"
-            return f"""
-### {chapter_name}.1 防洪标准
-{specs_text}
+        try:
+            from app.core.vector_store import VectorStoreService
+            vs = VectorStoreService(self.db)
+            terrain_results = await vs.search_similar_cases(query="地形特征 断面", top_k=1)
+            if terrain_results:
+                terrain_info = str(terrain_results[0].get("design_params", ""))
+        except Exception:
+            pass
 
-### {chapter_name}.2 工程规模
-{project_info.scale}
-"""
-        else:
-            return f"""
-{project_info.name}的{chapter_name}内容。
+        try:
+            from sqlalchemy import select
+            from app.models.cost_estimate import CostEstimate
+            stmt = (
+                select(CostEstimate)
+                .where(CostEstimate.project_id == _current_project_id.get())
+                .order_by(CostEstimate.version.desc())
+                .limit(1)
+            )
+            result = await self.db.execute(stmt)
+            estimate = result.scalar_one_or_none()
+            if estimate:
+                cost_data = f"总造价 {estimate.total_cost:.2f} 万元"
+        except Exception:
+            pass
 
-参考案例：{cases[0]["name"] if cases else "无"}
-"""
+        prompt = template.format(
+            project_name=project_info.name,
+            description=project_info.description,
+            scale=project_info.scale,
+            specs_text=specs_text,
+            cases_text=cases_text,
+            terrain_info=terrain_info,
+            cost_data=cost_data,
+        )
+
+        try:
+            llm = get_llm(temperature=0.4)
+            response = await llm.ainvoke(prompt)
+            return response.content
+        except Exception as e:
+            return f"[LLM 生成失败: {str(e)}]\n\n{project_info.name}的{chapter_name}内容。"
 
     async def _render_document(
         self,

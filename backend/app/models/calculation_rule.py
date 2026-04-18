@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, DateTime, Text, JSON
+from app.core.utils import utc_now
+from sqlalchemy import String, DateTime, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,8 +20,8 @@ class CalculationRule(Base):
     params: Mapped[JSONB] = mapped_column(JSONB, nullable=False)  # 参数定义 {"length": {"type": "design_param"}, "coefficient": {"type": "constant", "value": 1.05}}
     description: Mapped[str] = mapped_column(String(500), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     def __repr__(self) -> str:
         return f"<CalculationRule {self.project_type}/{self.item_category}/{self.item_name}>"

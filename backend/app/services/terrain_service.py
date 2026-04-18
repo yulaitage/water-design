@@ -1,5 +1,5 @@
+import asyncio
 import uuid
-import magic
 from pathlib import Path
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,43 +93,43 @@ class TerrainService:
         filename: str,
         content: bytes
     ) -> Path:
-        """保存文件到上传目录"""
         project_dir = self.upload_dir / str(project_id)
         project_dir.mkdir(parents=True, exist_ok=True)
 
-        # 生成唯一文件名
-        unique_name = f"{uuid.uuid4().hex}_{filename}"
+        safe_name = Path(filename).name
+        unique_name = f"{uuid.uuid4().hex}_{safe_name}"
         file_path = project_dir / unique_name
 
         with open(file_path, "wb") as f:
-            f.write(content)
+            for offset in range(0, len(content), 65536):
+                f.write(content[offset : offset + 65536])
 
         return file_path
 
     async def _parse_file(self, file_path: Path, file_type: str) -> Dict[str, Any]:
-        """解析文件提取特征"""
-        if file_type.upper() == "CSV":
-            parser = CSVParser(file_path)
-        elif file_type.upper() == "DXF":
-            parser = DXFParser(file_path)
-        else:
-            raise InvalidFileTypeException(file_type=file_type, allowed_types=["CSV", "DXF"])
+        """解析文件提取特征（同步解析，线程池执行避免阻塞事件循环）"""
+        def parse_sync():
+            if file_type.upper() == "CSV":
+                parser = CSVParser(file_path)
+            elif file_type.upper() == "DXF":
+                parser = DXFParser(file_path)
+            else:
+                raise InvalidFileTypeException(file_type=file_type, allowed_types=["CSV", "DXF"])
 
-        # 流式解析
-        list(parser.parse())
+            list(parser.parse())
 
-        # 提取特征
-        features = {
-            "centerline": parser.extract_centerline(),
-            "cross_sections": parser.extract_cross_sections(),
-            "elevation_range": parser.extract_elevation_range(),
-            "slope_analysis": parser.extract_slope_analysis(),
-            "waterfront_line": None,
-            "demolition_boundary": None,
-            "farmland_boundary": None,
-        }
+            return {
+                "centerline": parser.extract_centerline(),
+                "cross_sections": parser.extract_cross_sections(),
+                "elevation_range": parser.extract_elevation_range(),
+                "slope_analysis": parser.extract_slope_analysis(),
+                "waterfront_line": None,
+                "demolition_boundary": None,
+                "farmland_boundary": None,
+            }
 
-        return features
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, parse_sync)
 
     async def _update_terrain_features(
         self,

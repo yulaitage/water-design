@@ -2,7 +2,7 @@ import csv
 from pathlib import Path
 from typing import Iterator, Dict, Any, Optional, List
 from app.services.parsers.base import BaseParser
-from app.core.exceptions import FileCorruptedException, NoFeatureExtractedException
+from app.core.exceptions import NoFeatureExtractedException
 
 
 class CSVParser(BaseParser):
@@ -62,7 +62,7 @@ class CSVParser(BaseParser):
                     # 收集中心线点
                     self._centerline_points.append([point["x"], point["y"], point["z"]])
                     yield point
-                except (ValueError, KeyError) as e:
+                except (ValueError, KeyError):
                     continue  # 跳过无效行
 
     def extract_centerline(self) -> Optional[Dict[str, Any]]:

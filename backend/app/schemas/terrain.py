@@ -1,19 +1,18 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any, Literal
 from uuid import UUID
-from datetime import datetime
 
 
 class CrossSection(BaseModel):
-    station: float  # 桩号
-    shape: List[List[float]]  # [[x, y, z], ...]
+    station: float
+    shape: List[List[float]]
     area: Optional[float] = None
 
 
 class TerrainFeatures(BaseModel):
     centerline: Optional[Dict[str, Any]] = None
     cross_sections: Optional[List[CrossSection]] = None
-    elevation_range: Optional[List[float]] = None  # [min, max, mean]
+    elevation_range: Optional[List[float]] = None
     slope_analysis: Optional[Dict[str, Any]] = None
     waterfront_line: Optional[Dict[str, Any]] = None
     demolition_boundary: Optional[Dict[str, Any]] = None
@@ -36,8 +35,7 @@ class TerrainResponse(BaseModel):
     feature_count: Optional[int] = None
     warning: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TerrainUploadResponse(BaseModel):
@@ -50,5 +48,4 @@ class TerrainUploadResponse(BaseModel):
     feature_count: Optional[int] = None
     warning: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

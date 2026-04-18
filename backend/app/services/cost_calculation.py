@@ -115,7 +115,7 @@ class CostCalculationService:
             select(CalculationRule).where(
                 and_(
                     CalculationRule.project_type == project_type,
-                    CalculationRule.is_active == True
+                    CalculationRule.is_active
                 )
             )
         )

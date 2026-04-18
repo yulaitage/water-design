@@ -11,5 +11,5 @@ from app.models.conversation import Conversation
 __all__ = [
     "Specification", "Case", "ReportTask", "ReportRevision",
     "Project", "Terrain", "CalculationRule", "UnitPrice",
-    "CostEstimate", "Conversation"
+    "CostEstimate", "Conversation",
 ]

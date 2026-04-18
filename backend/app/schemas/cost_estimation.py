@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Literal
+from pydantic import BaseModel, ConfigDict
+from typing import Optional, List, Dict, Literal
 from uuid import UUID
 from datetime import datetime
 
@@ -29,8 +29,6 @@ class CostEstimateSummary(BaseModel):
 
 
 class CostEstimateCreateRequest(BaseModel):
-    """创建估算请求"""
-    project_id: UUID
     project_type: Literal["堤防", "河道整治"] = "堤防"
     design_params: Dict[str, float]
 
@@ -49,8 +47,7 @@ class CostEstimateResponse(BaseModel):
     cost_per_km: Optional[float] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CostEstimateListResponse(BaseModel):

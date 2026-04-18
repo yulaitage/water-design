@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from app.core.utils import utc_now
 from sqlalchemy import String, Integer, DateTime, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,8 +32,8 @@ class Terrain(Base):
     # 元数据
     bounds = mapped_column(Geometry(geometry_type="POLYGON", srid=4490), nullable=True)
     feature_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     def get_features(self) -> Dict[str, Any]:
         return {

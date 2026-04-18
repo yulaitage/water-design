@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from app.core.utils import utc_now
 from sqlalchemy import String, Integer, DateTime, ForeignKey, Numeric
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,8 +34,8 @@ class CostEstimate(Base):
     output_excel_path: Mapped[str] = mapped_column(String(500), nullable=True)
     output_word_path: Mapped[str] = mapped_column(String(500), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     def __repr__(self) -> str:
         return f"<CostEstimate {self.project_id} v{self.version} {self.total_cost}万元>"

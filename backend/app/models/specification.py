@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from app.core.utils import utc_now
 from sqlalchemy import String, Text, DateTime, Index
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
@@ -19,7 +20,7 @@ class Specification(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)          # Markdown条款内容
     content_embedding: Mapped[Vector] = mapped_column(Vector(1536), nullable=True)
     project_types: Mapped[list] = mapped_column(ARRAY(String), default=[])  # 适用工程类型
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     __table_args__ = (
         Index("ix_spec_project_types", "project_types", postgresql_using="gin"),

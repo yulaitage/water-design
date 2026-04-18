@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from app.core.utils import utc_now
 from sqlalchemy import String, Text, DateTime, JSON, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,7 +21,7 @@ class Case(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=True)            # AI设计摘要
     summary_embedding: Mapped[Vector] = mapped_column(Vector(1536), nullable=True)
     design_params: Mapped[dict] = mapped_column(JSON, default={})       # 设计参数
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     __table_args__ = (
         Index("ix_case_location", "location"),

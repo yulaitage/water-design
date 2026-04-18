@@ -1,5 +1,6 @@
 import uuid
-from fastapi import APIRouter, Depends, Path, BackgroundTasks
+from fastapi import HTTPException
+from fastapi import APIRouter, Depends, Path
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,7 +60,6 @@ async def get_report_status(
         )
 
     # 查数据库
-    service = ReportService(db)
     from app.models.report import ReportTask
     from sqlalchemy import select
     stmt = select(ReportTask).where(ReportTask.id == task_id)
@@ -91,7 +91,6 @@ async def download_report(
     db: AsyncSession = Depends(get_db)
 ):
     """下载报告Word文档"""
-    service = ReportService(db)
     from app.models.report import ReportTask
     from sqlalchemy import select
     stmt = select(ReportTask).where(ReportTask.id == task_id)
@@ -99,10 +98,19 @@ async def download_report(
     task = result.scalar_one_or_none()
 
     if not task or not task.output_path:
-        return {"error": "报告尚未生成"}
+        raise HTTPException(status_code=404, detail="报告尚未生成")
+
+    from pathlib import Path
+    report_path = Path(task.output_path).resolve()
+    uploads_dir = Path("uploads/reports").resolve()
+    if not str(report_path).startswith(str(uploads_dir)):
+        raise HTTPException(status_code=400, detail="无效的报告路径")
+
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="报告文件不存在")
 
     return FileResponse(
-        path=task.output_path,
+        path=str(report_path),
         filename=f"report_{task_id}.docx",
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )

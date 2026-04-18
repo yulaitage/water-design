@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from app.core.utils import utc_now
 from decimal import Decimal
 from sqlalchemy import String, DateTime, Numeric, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID
@@ -19,8 +20,8 @@ class UnitPrice(Base):
     year: Mapped[int] = mapped_column(Integer, nullable=True)  # 2024
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="user_import")  # "user_import" | "knowledge_base"
     description: Mapped[Text] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     def __repr__(self) -> str:
         return f"<UnitPrice {self.item_name} {self.price}{self.unit}>"
