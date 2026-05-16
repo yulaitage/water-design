@@ -54,3 +54,25 @@ class RetrievalResult(BaseModel):
     content: str
     relevance_score: float
     metadata: dict
+
+
+class WikiItemResponse(BaseModel):
+    id: UUID
+    title: str
+    category: str
+    content: str
+    source_chapter: Optional[str] = None
+    tags: List[str] = []
+    project_types: List[str] = []
+    usage_count: int = 0
+    is_verified: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class WikiExportResponse(BaseModel):
+    items: List[WikiItemResponse]
+    total_count: int
+    categories: List[str]

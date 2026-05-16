@@ -18,7 +18,7 @@ class Specification(Base):
     chapter: Mapped[str] = mapped_column(String(100), nullable=False)   # 章节 "3.1 基本规定"
     section: Mapped[str] = mapped_column(String(50), nullable=True)    # 条款编号 "3.1.2"
     content: Mapped[str] = mapped_column(Text, nullable=False)          # Markdown条款内容
-    content_embedding: Mapped[Vector] = mapped_column(Vector(1536), nullable=True)
+    content_embedding: Mapped[Vector] = mapped_column(Vector(1024), nullable=True)
     project_types: Mapped[list] = mapped_column(ARRAY(String), default=[])  # 适用工程类型
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 

@@ -14,6 +14,11 @@ from app.api.v1 import (
     chat_router,
     reports_router,
     knowledge_base_router,
+    export_router,
+    calculation_router,
+    interactive_report_router,
+    skills_router,
+    user_router,
 )
 from app.config import settings
 
@@ -71,15 +76,16 @@ async def rate_limit_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    if not settings.api_key or request.url.path == "/health":
+    if request.url.path == "/health":
         return await call_next(request)
 
-    api_key = request.headers.get("X-API-Key")
-    if not api_key or api_key != settings.api_key:
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"detail": "Invalid or missing API key"},
-        )
+    if settings.api_key and settings.api_key.strip():
+        api_key = request.headers.get("X-API-Key")
+        if not api_key or api_key != settings.api_key:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Invalid or missing API key"},
+            )
     return await call_next(request)
 
 
@@ -95,3 +101,8 @@ app.include_router(unit_prices_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
 app.include_router(knowledge_base_router, prefix="/api/v1")
+app.include_router(export_router, prefix="/api/v1")
+app.include_router(calculation_router, prefix="/api/v1")
+app.include_router(interactive_report_router, prefix="/api/v1")
+app.include_router(skills_router, prefix="/api/v1")
+app.include_router(user_router, prefix="/api/v1")

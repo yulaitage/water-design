@@ -21,10 +21,15 @@ class Settings(BaseSettings):
     embedding_base_url: str = ""
     max_context_messages: int = 10
 
+    # Vision (multimodal image description)
+    vision_model: str = ""
+    vision_api_key: str = ""
+    vision_base_url: str = ""
+
     # Auth
     api_key: str = ""
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

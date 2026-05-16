@@ -103,7 +103,12 @@ async def download_report(
     from pathlib import Path
     report_path = Path(task.output_path).resolve()
     uploads_dir = Path("uploads/reports").resolve()
-    if not str(report_path).startswith(str(uploads_dir)):
+
+    # Use is_relative_to for proper path traversal check (Python 3.9+)
+    try:
+        if not report_path.is_relative_to(uploads_dir):
+            raise HTTPException(status_code=400, detail="无效的报告路径")
+    except ValueError:
         raise HTTPException(status_code=400, detail="无效的报告路径")
 
     if not report_path.exists():

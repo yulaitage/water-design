@@ -15,6 +15,21 @@ class ReportTask(Base):
     report_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "feasibility" | "preliminary_design"
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     version: Mapped[int] = mapped_column(Integer, default=1)
+
+    # 交互式生成字段
+    is_interactive: Mapped[bool] = mapped_column(default=False)  # 是否为交互式生成
+    phase: Mapped[str] = mapped_column(String(30), default="idle")  # ReportPhase
+    current_chapter_index: Mapped[int] = mapped_column(Integer, default=0)
+    chapters_metadata: Mapped[dict] = mapped_column(JSONB, default={})  # 章节状态信息
+    # 结构: {
+    #   "第1章 项目概述": {
+    #     "status": "complete|pending|revision",
+    #     "confirmed": true,
+    #     "revision_count": 0,
+    #     "input_requests": [...]
+    #   }
+    # }
+
     chapters: Mapped[dict] = mapped_column(JSONB, default={})  # 各章节内容
     output_path: Mapped[str] = mapped_column(String(500), nullable=True)  # Word文件路径
     error_message: Mapped[str] = mapped_column(Text, nullable=True)

@@ -14,14 +14,19 @@ services:
     build: ./backend
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      - uploads:/app/uploads
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-waterdesign}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-waterdesign}
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.minimaxi.com/v1}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      VISION_MODEL: ${VISION_MODEL:-}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+      VISION_BASE_URL: ${VISION_BASE_URL:-}
       API_KEY: ${API_KEY:-}
     depends_on:
       - db
@@ -35,3 +40,4 @@ services:
 
 volumes:
   pgdata:
+  uploads:

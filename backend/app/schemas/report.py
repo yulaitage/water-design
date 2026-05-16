@@ -66,3 +66,50 @@ class RevisionHistoryItem(BaseModel):
 
 class RevisionHistoryResponse(BaseModel):
     revisions: List[RevisionHistoryItem]
+
+
+# 交互式报告生成 schemas
+
+class InteractiveReportStartRequest(BaseModel):
+    report_type: Literal["feasibility", "preliminary_design"] = "feasibility"
+    project_info: ProjectInfo
+    is_interactive: bool = True
+
+
+class InteractiveReportStartResponse(BaseModel):
+    task_id: UUID
+    phase: str
+    total_chapters: int
+    chapter_names: List[str]
+
+
+class ChapterConfirmRequest(BaseModel):
+    action: Literal["confirm", "revise"]
+    revision_note: Optional[str] = None
+
+
+class ChapterConfirmResponse(BaseModel):
+    status: str  # "continued" | "revision_requested"
+    next_chapter: Optional[str] = None
+    all_completed: bool = False
+
+
+class SupplyInfoRequest(BaseModel):
+    info_type: str  # "terrain_data" | "image" | "document"
+    description: str
+    content: Optional[str] = None  # 文本内容或文件路径
+
+
+class SupplyInfoResponse(BaseModel):
+    status: str
+    continue_generation: bool = True
+
+
+class InteractiveReportStatusResponse(BaseModel):
+    task_id: UUID
+    phase: str
+    current_chapter_index: int
+    current_chapter: Optional[str]
+    chapters: dict  # {chapter_name: {status, confirmed, revision_count, pending_inputs}}
+    progress: int
+    error: Optional[str] = None

@@ -19,7 +19,7 @@ class Case(Base):
     owner: Mapped[str] = mapped_column(String(200), nullable=True)       # 业主单位
     report_path: Mapped[str] = mapped_column(String(500), nullable=True)  # 原始报告Markdown路径
     summary: Mapped[str] = mapped_column(Text, nullable=True)            # AI设计摘要
-    summary_embedding: Mapped[Vector] = mapped_column(Vector(1536), nullable=True)
+    summary_embedding: Mapped[Vector] = mapped_column(Vector(1024), nullable=True)
     design_params: Mapped[dict] = mapped_column(JSON, default={})       # 设计参数
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 

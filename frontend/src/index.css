@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-[#0D0D0D] text-[#D1D1D1] antialiased;
+  }
+}
+
+@layer components {
+  .artifact-stage {
+    @apply bg-[#141414] border border-[#262626] rounded-2xl shadow-2xl relative overflow-hidden;
+  }
+  
+  .chat-bubble-user {
+    @apply bg-[#1A1A1A] text-[#E5E5E5] px-4 py-3 rounded-2xl max-w-[85%] text-sm border border-[#262626];
+  }
+
+  .chat-bubble-ai {
+    @apply bg-[#1A1A1A] text-[#D1D1D1] px-4 py-3 rounded-2xl max-w-[85%] text-sm leading-relaxed border border-[#262626];
+  }
+
+  .blueprint-grid {
+    background-image: 
+      linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-[#262626] rounded-full;
+  }
+}

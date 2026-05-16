@@ -1,7 +1,7 @@
 import uuid
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -74,24 +74,41 @@ class MemoryService:
     async def search_semantic_memory(
         self, query: str, top_k: int = 3
     ) -> str:
-        """语义检索相关记忆（语义记忆）"""
+        """语义检索相关记忆（语义记忆：规范 + Wiki知识）"""
         try:
             from app.core.vector_store import VectorStoreService
 
             vs = VectorStoreService(self.db)
+
+            # 检索规范
             specs = await vs.search_similar_specifications(query=query, top_k=top_k)
 
-            if not specs:
-                return ""
+            # 检索Wiki知识
+            wiki_results = await vs.search_wiki_items(query=query, top_k=top_k)
 
             lines = []
-            for s in specs:
-                lines.append(
-                    f"[{s['code']}] {s['name']}: {s['content'][:200]}"
-                )
-            return "相关规范参考：\n" + "\n".join(lines)
+
+            # 规范结果
+            if specs:
+                lines.append("【相关规范参考】")
+                for s in specs:
+                    lines.append(f"[{s['code']}] {s['name']}: {s['content'][:200]}")
+
+            # Wiki知识结果
+            if wiki_results:
+                lines.append("\n【工程实践知识】")
+                for w in wiki_results:
+                    category_tag = f"[{w.get('category', '')}]"
+                    lines.append(f"{category_tag} {w['title']}: {w['content'][:200]}")
+
+            return "\n".join(lines) if lines else ""
+
         except Exception as e:
             logger.warning("Semantic memory search failed: %s", e)
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
             return ""
 
     async def build_context_block(
@@ -134,7 +151,7 @@ class MemoryService:
         result = await self.db.execute(stmt)
         conversation = result.scalar_one_or_none()
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now().isoformat()
 
         if not conversation:
             conversation = Conversation(
@@ -161,7 +178,7 @@ class MemoryService:
                 "tool_calls": tool_calls or [],
             }
         )
-        conversation.updated_at = datetime.now(timezone.utc)
+        conversation.updated_at = datetime.now()
 
         await self.db.commit()
         await self.db.refresh(conversation)

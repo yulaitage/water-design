@@ -14,9 +14,23 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     """对话请求"""
-    project_id: UUID
+    project_id: Optional[UUID] = None  # Optional for backward compatibility
+    project_id_str: Optional[str] = None  # For frontend string IDs like "1"
     message: str
     context: Optional[Dict[str, Any]] = None
+    # AI Model Config from frontend
+    model_type: Optional[str] = None  # 'gemini', 'openai', 'local'
+    model_name: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    # Embedding Config from frontend
+    embedding_model: Optional[str] = None
+    embedding_api_key: Optional[str] = None
+    embedding_base_url: Optional[str] = None
+    # Vision Config from frontend
+    vision_model: Optional[str] = None
+    vision_api_key: Optional[str] = None
+    vision_base_url: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

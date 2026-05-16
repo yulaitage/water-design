@@ -2,7 +2,7 @@ import logging
 import uuid
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -17,8 +17,12 @@ from app.core.report_exceptions import (
     GenerationFailedException,
     InvalidRevisionException
 )
+from app.core.report_state import ReportPhase, ChapterState, InputRequestType
+from app.core.interactive_task_queue import interactive_task_queue
+from app.services.knowledge_mining_service import KnowledgeMiningService
 
 _current_project_id: ContextVar[uuid.UUID] = ContextVar("_current_project_id")
+_current_task_id: ContextVar[uuid.UUID] = ContextVar("_current_task_id")
 logger = logging.getLogger(__name__)
 
 
@@ -143,6 +147,24 @@ class ReportService:
                     project_info=project_info
                 )
                 chapters[chapter_name] = content
+
+                # 挖掘知识并存储到Wiki
+                try:
+                    mining_service = KnowledgeMiningService(self.db)
+                    project_info_dict = {
+                        "name": project_info.name,
+                        "description": project_info.description,
+                        "scale": project_info.scale,
+                        "location": project_info.location,
+                    }
+                    await mining_service.mine_knowledge_from_chapter(
+                        chapter_name=chapter_name,
+                        chapter_content=content,
+                        project_info=project_info_dict,
+                        report_id=task_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Knowledge mining failed for {chapter_name}: {e}")
 
             # 更新进度：渲染文档
             task_queue.update_task(
@@ -372,3 +394,396 @@ class ReportService:
         )
         result = await self.db.execute(stmt)
         return result.scalars().all()
+
+    # ==================== 交互式报告生成方法 ====================
+
+    async def start_interactive_report(
+        self,
+        project_id: uuid.UUID,
+        report_type: str,
+        project_info: ProjectInfo
+    ) -> uuid.UUID:
+        """启动交互式报告生成"""
+        # 创建交互式任务
+        task = ReportTask(
+            project_id=project_id,
+            report_type=report_type,
+            status="pending",
+            version=1,
+            is_interactive=True,
+            phase=ReportPhase.RETRIEVING.value,
+            current_chapter_index=0,
+            chapters_metadata={name: {"status": ChapterState.PENDING.value, "confirmed": False, "revision_count": 0}
+                             for name in self.CHAPTER_ORDER}
+        )
+        self.db.add(task)
+        await self.db.commit()
+        await self.db.refresh(task)
+
+        # 创建交互式任务队列
+        task_id = interactive_task_queue.create_task(project_id, self.CHAPTER_ORDER)
+        _current_task_id.set(task_id)
+
+        return task_id
+
+    async def interactive_retrieve_knowledge(
+        self,
+        task_id: uuid.UUID,
+        project_info: ProjectInfo
+    ) -> tuple[List[dict], List[dict]]:
+        """交互式检索知识库（带进度）"""
+        interactive_task_queue.update_phase(task_id, ReportPhase.RETRIEVING)
+
+        # 检索规范
+        yield {
+            "type": "retrieving_progress",
+            "progress": 20,
+            "step": "正在检索相关规范条文..."
+        }
+
+        specs = []
+        try:
+            vs_service = self.retrieval_service.vector_store
+            specs = await vs_service.search_similar_specifications(
+                query=f"{project_info.description} {project_info.scale}",
+                top_k=10,
+                project_type=self._infer_project_type(project_info)
+            )
+        except Exception as e:
+            logger.warning("Specification retrieval failed: %s", e)
+
+        yield {
+            "type": "retrieving_progress",
+            "progress": 50,
+            "step": f"检索到 {len(specs)} 条相关规范"
+        }
+
+        # 检索案例
+        yield {
+            "type": "retrieving_progress",
+            "progress": 60,
+            "step": "正在检索相似工程案例..."
+        }
+
+        cases = []
+        try:
+            cases = await vs_service.search_similar_cases(
+                query=f"{project_info.description} {project_info.location}",
+                top_k=5,
+                project_type=self._infer_project_type(project_info)
+            )
+        except Exception as e:
+            logger.warning("Case retrieval failed: %s", e)
+
+        yield {
+            "type": "retrieving_progress",
+            "progress": 80,
+            "step": f"检索到 {len(cases)} 个相似案例"
+        }
+
+        # 更新任务队列
+        task = interactive_task_queue.get_task(task_id)
+        if task:
+            task.retrieved_specs = specs
+            task.retrieved_cases = cases
+
+        yield {
+            "type": "retrieving_progress",
+            "progress": 100,
+            "step": "知识库检索完成，正在构建报告框架..."
+        }
+
+    async def interactive_generate_chapter_stream(
+        self,
+        task_id: uuid.UUID,
+        chapter_index: int,
+        specs: List[dict],
+        cases: List[dict],
+        project_info: ProjectInfo,
+        revision_note: Optional[str] = None
+    ) -> AsyncGenerator[dict, None]:
+        """交互式流式生成章节内容
+
+        Yields:
+            dict - SSE事件数据
+        """
+        if chapter_index >= len(self.CHAPTER_ORDER):
+            return
+
+        chapter_name = self.CHAPTER_ORDER[chapter_index]
+        _current_project_id.set(interactive_task_queue.get_task(task_id).project_id)
+
+        # 更新任务状态
+        interactive_task_queue.set_chapter_generating(task_id, chapter_index)
+
+        yield {
+            "type": "chapter_start",
+            "chapter": chapter_name,
+            "chapter_index": chapter_index,
+            "total_chapters": len(self.CHAPTER_ORDER)
+        }
+
+        # 构建章节生成提示词
+        prompt = await self._build_chapter_prompt(
+            chapter_name=chapter_name,
+            specs=specs,
+            cases=cases,
+            project_info=project_info,
+            revision_note=revision_note
+        )
+
+        # 流式生成
+        llm = None
+        try:
+            from app.core.llm import get_llm
+            llm = get_llm(temperature=0.4)
+        except Exception as e:
+            logger.error("Failed to get LLM: %s", e)
+            yield {"type": "error", "message": f"LLM初始化失败: {str(e)}"}
+            return
+
+        try:
+            collected_content = []
+            async for chunk in llm.astream(prompt):
+                if chunk.content:
+                    collected_content.append(chunk.content)
+                    # 实时输出内容块
+                    yield {
+                        "type": "chunk",
+                        "chapter": chapter_name,
+                        "content": chunk.content
+                    }
+
+                    # 检测是否需要用户输入（通过关键词或内容分析）
+                    detected_input = await self._detect_missing_info(
+                        "".join(collected_content),
+                        chapter_name
+                    )
+                    if detected_input:
+                        yield {
+                            "type": "need_input",
+                            "chapter": chapter_name,
+                            "info_type": detected_input["type"],
+                            "description": detected_input["description"]
+                        }
+                        # 等待用户提供输入
+                        await interactive_task_queue.wait_for_user_input(task_id)
+
+            full_content = "".join(collected_content)
+
+            # 更新章节内容到任务队列
+            interactive_task_queue.update_chapter_status(
+                task_id, chapter_name, ChapterState.WAITING_CONFIRM, full_content
+            )
+
+            yield {
+                "type": "chapter_complete",
+                "chapter": chapter_name,
+                "chapter_index": chapter_index,
+                "content": full_content,
+                "revision_count": interactive_task_queue.get_chapter_context(task_id, chapter_name).revision_count
+            }
+
+            # 等待用户确认
+            confirmed, revision_note = await interactive_task_queue.wait_for_confirmation(task_id)
+
+            if not confirmed and revision_note:
+                # 用户要求修改，重新生成本章
+                async for event in self.interactive_generate_chapter_stream(
+                    task_id, chapter_index, specs, cases, project_info, revision_note
+                ):
+                    yield event
+            elif confirmed:
+                # 确认完成，标记章节
+                interactive_task_queue.update_chapter_status(
+                    task_id, chapter_name, ChapterState.COMPLETE
+                )
+
+                # 挖掘本章知识到Wiki
+                try:
+                    mining_service = KnowledgeMiningService(self.db)
+                    project_info_dict = {
+                        "name": project_info.name,
+                        "description": project_info.description,
+                        "scale": project_info.scale,
+                        "location": project_info.location,
+                    }
+                    await mining_service.mine_knowledge_from_chapter(
+                        chapter_name=chapter_name,
+                        chapter_content=full_content,
+                        project_info=project_info_dict,
+                        report_id=task_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Knowledge mining failed for {chapter_name}: {e}")
+
+                if chapter_index < len(self.CHAPTER_ORDER) - 1:
+                    # 还有下一章
+                    yield {
+                        "type": "awaiting_confirmation",
+                        "chapter": chapter_name,
+                        "confirmed": True,
+                        "next_chapter": self.CHAPTER_ORDER[chapter_index + 1]
+                    }
+                else:
+                    # 全部完成
+                    yield {
+                        "type": "all_chapters_complete",
+                        "chapter": chapter_name
+                    }
+
+        except Exception as e:
+            logger.exception("Chapter generation error")
+            yield {"type": "error", "chapter": chapter_name, "message": str(e)}
+
+    async def _build_chapter_prompt(
+        self,
+        chapter_name: str,
+        specs: List[dict],
+        cases: List[dict],
+        project_info: ProjectInfo,
+        revision_note: Optional[str] = None
+    ) -> str:
+        """构建章节生成提示词"""
+        from app.prompts.report_prompts import CHAPTER_PROMPTS
+
+        template = CHAPTER_PROMPTS.get(chapter_name, "")
+
+        specs_text = "\n".join([
+            f"- [{s.get('code', '规范')}] {s.get('name', '')}: {s.get('content', '')[:200]}..."
+            for s in specs[:5]
+        ]) if specs else "暂无相关规范"
+
+        cases_text = "\n".join([
+            f"- {c.get('name', '案例')}: {c.get('summary', c.get('description', ''))[:200]}..."
+            for c in cases[:3]
+        ]) if cases else "暂无相似案例"
+
+        terrain_info = ""
+        cost_data = ""
+
+        try:
+            from app.core.vector_store import VectorStoreService
+            vs = VectorStoreService(self.db)
+            terrain_results = await vs.search_similar_cases(query="地形特征 断面", top_k=1)
+            if terrain_results:
+                terrain_info = str(terrain_results[0].get("design_params", ""))
+        except Exception:
+            pass
+
+        try:
+            from sqlalchemy import select
+            from app.models.cost_estimate import CostEstimate
+            stmt = (
+                select(CostEstimate)
+                .where(CostEstimate.project_id == _current_project_id.get())
+                .order_by(CostEstimate.version.desc())
+                .limit(1)
+            )
+            result = await self.db.execute(stmt)
+            estimate = result.scalar_one_or_none()
+            if estimate:
+                cost_data = f"总造价 {estimate.total_cost:.2f} 万元"
+        except Exception:
+            pass
+
+        revision_context = ""
+        if revision_note:
+            revision_context = f"\n\n【用户修改意见】：{revision_note}\n请根据修改意见重新生成内容。"
+
+        prompt = f"""你是一位资深水利工程师，负责生成水利工程可行性研究报告的章节内容。
+
+【项目信息】
+- 项目名称：{project_info.name}
+- 项目地点：{project_info.location}
+- 工程规模：{project_info.scale}
+- 项目描述：{project_info.description}
+
+【参考规范】
+{specs_text}
+
+【相似案例】
+{cases_text}
+
+【地形信息】
+{terrain_info or "暂无地形数据"}
+
+【造价信息】
+{cost_data or "暂无造价数据"}
+
+【章节要求】
+{template or f"请生成{chapter_name}的完整内容，包括必要的背景介绍、技术分析和建议。"}
+{revision_context}
+
+请生成专业的技术报告内容，使用Markdown格式，确保内容准确、完整、可操作。
+"""
+        return prompt
+
+    async def _detect_missing_info(
+        self,
+        content: str,
+        chapter_name: str
+    ) -> Optional[dict]:
+        """检测内容中是否缺少必要信息，需要用户补充
+
+        Returns:
+            dict: {"type": str, "description": str} 或 None
+        """
+        # 简单的关键词检测
+        missing_patterns = [
+            ("terrain_data", ["地形", "断面", "高程", "地质"], "请提供地形断面数据或地质勘察资料"),
+            ("image", ["如图", "见附图", "示意图", "布置图"], "请提供相关工程图纸或示意图"),
+            ("specification", ["根据规范", "按照标准", "按GB"], "请提供相关规范的具体条文"),
+            ("case", ["参考案例", "类似工程", "工程实例"], "请提供一个相似的工程案例作为参考"),
+        ]
+
+        content_lower = content.lower()
+
+        for info_type, keywords, description in missing_patterns:
+            # 检查关键词是否在需要补充的上下文中
+            for kw in keywords:
+                if kw in content:
+                    # 检查周围是否有具体数据
+                    import re
+                    # 简单检查是否有数字或具体描述
+                    if not re.search(r'\d+', content.split(kw)[-1][:100] if kw in content else ""):
+                        return {"type": info_type, "description": description}
+
+        return None
+
+    async def render_interactive_report(
+        self,
+        task_id: uuid.UUID,
+        project_info: ProjectInfo
+    ) -> str:
+        """渲染交互式生成的报告为Word文档"""
+        task = interactive_task_queue.get_task(task_id)
+        if not task:
+            raise GenerationFailedException("任务不存在", "未找到任务")
+
+        chapters = {}
+        for name, ctx in task.chapters.items():
+            chapters[name] = ctx.content
+
+        output_dir = Path("uploads/reports")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{task_id}.docx"
+
+        self.template_service.create_word_document(
+            chapters=chapters,
+            output_path=str(output_path),
+            title=project_info.name
+        )
+
+        # 更新任务状态
+        interactive_task_queue.set_completed(task_id)
+
+        # 更新数据库
+        db_task = await self._get_task(task_id)
+        if db_task:
+            db_task.status = "completed"
+            db_task.output_path = str(output_path)
+            db_task.progress = 100
+            await self.db.commit()
+
+        return str(output_path)

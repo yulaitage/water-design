@@ -7,9 +7,13 @@ from app.models.calculation_rule import CalculationRule
 from app.models.unit_price import UnitPrice
 from app.models.cost_estimate import CostEstimate
 from app.models.conversation import Conversation
+from app.models.document import Document, DocumentChunk
+from app.models.document_image import DocumentImage
+from app.models.user import UserProfile
 
 __all__ = [
     "Specification", "Case", "ReportTask", "ReportRevision",
     "Project", "Terrain", "CalculationRule", "UnitPrice",
-    "CostEstimate", "Conversation",
+    "CostEstimate", "Conversation", "Document", "DocumentChunk",
+    "DocumentImage", "UserProfile",
 ]

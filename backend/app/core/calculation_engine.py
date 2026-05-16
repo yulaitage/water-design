@@ -171,7 +171,7 @@ class CalculationEngine:
                 value = self.constants[key]
             else:
                 value = context.constants[key]
-            expr = re.sub(rf"\b{key}\b", str(value), expr)
+            expr = re.sub(rf"\b{re.escape(key)}\b", str(value), expr)
         return expr
 
     def evaluate(self, formula: str, context: CalculationContext) -> Optional[float]:
