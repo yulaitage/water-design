@@ -2,6 +2,7 @@ import logging
 import time
 from collections import defaultdict
 from threading import Lock
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,6 +15,7 @@ from app.api.v1 import (
     chat_router,
     reports_router,
     knowledge_base_router,
+    materials_router,
     export_router,
     calculation_router,
     interactive_report_router,
@@ -24,7 +26,21 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Water Design API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting up with max_upload_size=%dMB", settings.max_upload_size // (1024*1024))
+    yield
+    logger.info("Shutting down")
+
+app = FastAPI(
+    title="Water Design API",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+# 设置请求体大小限制 (200MB)
+app.state.max_upload_size = settings.max_upload_size
 
 app.add_middleware(
     CORSMiddleware,
@@ -101,6 +117,7 @@ app.include_router(unit_prices_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
 app.include_router(knowledge_base_router, prefix="/api/v1")
+app.include_router(materials_router, prefix="/api/v1")
 app.include_router(export_router, prefix="/api/v1")
 app.include_router(calculation_router, prefix="/api/v1")
 app.include_router(interactive_report_router, prefix="/api/v1")

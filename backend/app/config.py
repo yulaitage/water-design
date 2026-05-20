@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     )
     upload_dir: str = "uploads"
     max_file_size: int = 500 * 1024 * 1024  # 500MB (down from 10GB to prevent OOM)
+    max_upload_size: int = 200 * 1024 * 1024  # 200MB - 大文件上传限制
 
     # LLM
     llm_provider: str = "openai"

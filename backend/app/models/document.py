@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from app.core.utils import utc_now
-from sqlalchemy import String, Text, DateTime, Integer, Index
+from sqlalchemy import String, Text, DateTime, Integer, Index, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from pgvector.sqlalchemy import Vector
@@ -27,6 +27,10 @@ class Document(Base):
     # 文档信息
     title: Mapped[str] = mapped_column(String(255), nullable=True)       # 文档标题
     project_type: Mapped[str] = mapped_column(String(50), nullable=True)  # 关联项目类型
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=True, index=True
+    )
     category: Mapped[str] = mapped_column(String(50), nullable=True)    # 分类：规范/案例/报告
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
@@ -35,6 +39,7 @@ class Document(Base):
     __table_args__ = (
         Index("ix_doc_project_type", "project_type"),
         Index("ix_doc_category", "category"),
+        Index("ix_doc_project_id", "project_id"),
     )
 
 

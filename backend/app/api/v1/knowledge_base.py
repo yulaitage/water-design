@@ -264,7 +264,7 @@ async def _create_chunks_and_get_records(
     return chunk_db_records
 
 
-async def _run_background_upload(task_id: str, file_path: Path, filename: str, content_len: int, category: str, project_type: Optional[str], vision_model: Optional[str], vision_api_key: Optional[str], vision_base_url: Optional[str], embedding_model: Optional[str], embedding_api_key: Optional[str], embedding_base_url: Optional[str]):
+async def _run_background_upload(task_id: str, file_path: Path, filename: str, content_len: int, category: str, project_type: Optional[str], project_id: Optional[str] = None, vision_model: Optional[str] = None, vision_api_key: Optional[str] = None, vision_base_url: Optional[str] = None, embedding_model: Optional[str] = None, embedding_api_key: Optional[str] = None, embedding_base_url: Optional[str] = None):
     """Run the heavy upload processing in the background."""
     _upload_tasks[task_id] = {"status": "processing", "step": "parsing", "message": "正在解析文档...", "started_at": time.time()}
     from app.db.database import async_session_maker
@@ -310,6 +310,7 @@ async def _run_background_upload(task_id: str, file_path: Path, filename: str, c
                 file_size=content_len,
                 title=title,
                 project_type=project_type,
+                project_id=uuid.UUID(project_id) if project_id else None,
                 category=category_clean,
                 full_text=full_text if full_text else None,
                 metadata_json=(parsed_data and parsed_data.get("metadata")) if parsed_data else None,

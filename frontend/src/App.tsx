@@ -41,7 +41,7 @@ import { cn } from './lib/utils';
 
 // Types
 type Category = 'consulting' | 'river' | 'drainage';
-type ArtifactType = 'report' | 'drawing' | 'analysis' | 'none';
+type ArtifactType = 'report' | 'material' | 'drawing' | 'analysis' | 'none';
 type ModelType = 'gemini' | 'openai' | 'local';
 
 interface ModelConfig {
@@ -115,6 +115,15 @@ export default function App() {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [systemStatus, setSystemStatus] = useState<string>('idle');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Project Material Library state
+  const [projectMaterials, setProjectMaterials] = useState<{id: string; name: string; size: string; page_count?: number}[]>([]);
+  const [isMaterialUploading, setIsMaterialUploading] = useState(false);
+  const [materialUploadProgress, setMaterialUploadProgress] = useState<string>('');
+  // 报告内容状态（用于报告预览）
+  const [reportContent, setReportContent] = useState<string | null>(null);
+  const [currentReportId, setCurrentReportId] = useState<string | null>(null);
+  const materialFileInputRef = useRef<HTMLInputElement>(null);
 
   // Load AI Config from localStorage
   const loadAiConfig = (): ModelConfig => {
@@ -217,10 +226,25 @@ export default function App() {
     try { localStorage.setItem('projects', JSON.stringify(projects)); } catch (e) {}
   }, [projects]);
 
-  // Initialize projectInfo
+  // Initialize projectInfo and load from backend
   useEffect(() => {
-    const loaded = loadProjects();
-    if (loaded.length > 0 && !projectInfo) setProjectInfo(loaded[0]);
+    fetch('/api/projects')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.projects?.length) return;  // Only use backend if it has projects
+        const backendProjects = data.projects.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description || '',
+          category: 'river' as Category,
+        }));
+        setProjects(backendProjects);
+        if (!projectInfo) setProjectInfo(backendProjects[0]);
+      })
+      .catch(() => {
+        const loaded = loadProjects();
+        if (loaded.length > 0 && !projectInfo) setProjectInfo(loaded[0]);
+      });
   }, []);
 
   // AI Configuration State - now loaded from localStorage via loadAiConfig
@@ -393,6 +417,35 @@ export default function App() {
         console.log('data.content:', data.content);
         aiContent = data.message || data.content || data.text || "AI 引擎未返回结果。";
         console.log('aiContent:', aiContent.substring(0, 100));
+
+        // 检查报告生成意图
+        if (data.intent === 'REPORT_GENERATE') {
+          console.log('Detected REPORT_GENERATE intent, report_id:', data.report_id);
+          if (data.report_id) {
+            setCurrentReportId(data.report_id);
+            // 优先使用API返回的报告内容（已包含在响应中）
+            if (data.report_content) {
+              console.log('Using report_content from API response, length:', data.report_content.length);
+              setReportContent(data.report_content);
+              setActiveArtifact('report');
+            } else {
+              // 如果API未返回内容，通过项目API获取
+              const projectId = currentProject?.id || localStorage.getItem('currentProjectId');
+              if (projectId) {
+                fetch(`/api/v1/projects/${projectId}/reports/${data.report_id}/content`)
+                  .then(r => r.ok ? r.json() : null)
+                  .then(contentData => {
+                    if (contentData?.content) {
+                      console.log('Got report content from API, length:', contentData.content.length);
+                      setReportContent(contentData.content);
+                      setActiveArtifact('report');
+                    }
+                  })
+                  .catch(err => console.error('Failed to fetch report content:', err));
+              }
+            }
+          }
+        }
       }
 
       console.log('=== Setting messages with aiContent length:', aiContent.length);
@@ -459,6 +512,159 @@ export default function App() {
     }
   };
 
+  // Handle Material Upload
+  const handleMaterialUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !projectInfo?.id) return;
+
+    // 限制100MB以上文件
+    const MAX_SIZE = 100 * 1024 * 1024;  // 100MB
+    if (file.size > MAX_SIZE) {
+      alert(`文件过大（${(file.size/1024/1024).toFixed(1)}MB），最大支持 100MB`);
+      return;
+    }
+
+    // Check if project ID is a valid UUID (backend-created project)
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectInfo?.id || "");
+    if (!isUUID) {
+      alert('请先保存项目到服务器后再上传素材');
+      return;
+    }
+
+    setIsMaterialUploading(true);
+    setMaterialUploadProgress('正在上传...');
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // 保存当前项目ID，防止轮询时项目已切换
+    const currentProjectId = projectInfo?.id;
+    if (!currentProjectId) {
+      setIsMaterialUploading(false);
+      setMaterialUploadProgress('');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/projects/${currentProjectId}/materials/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+
+      const poll = async () => {
+        try {
+          const res = await fetch(`/api/projects/${currentProjectId}/materials/upload/status/${data.taskId}`);
+          const status = await res.json();
+          if (status.status === 'processing') {
+            setMaterialUploadProgress(status.message || '处理中...');
+            setTimeout(poll, 3000);
+          } else if (status.status === 'done') {
+            // 完成后从后端重新加载素材列表以获取真实ID
+            fetch(`/api/projects/${currentProjectId}/materials/`)
+              .then(r => r.json())
+              .then(materialsData => {
+                setProjectMaterials((materialsData.materials || []).map((m: any) => ({
+                  id: m.id,
+                  name: m.title || m.filename,
+                  size: m.size ? (m.size / 1024 / 1024).toFixed(1) + 'MB' : '',
+                  page_count: m.page_count,
+                })));
+              });
+            setIsMaterialUploading(false);
+            setMaterialUploadProgress('');
+          } else if (status.status === 'error') {
+            alert('素材上传失败: ' + (status.message || '未知错误'));
+            setIsMaterialUploading(false);
+            setMaterialUploadProgress('');
+          }
+        } catch {
+          setIsMaterialUploading(false);
+          setMaterialUploadProgress('');
+        }
+      };
+      poll();
+    } catch (err: any) {
+      alert('上传失败: ' + err.message);
+      setIsMaterialUploading(false);
+      setMaterialUploadProgress('');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  // Handle Material Delete
+  const handleDeleteMaterial = async (materialId: string) => {
+    if (!projectInfo?.id) return;
+    if (!confirm('确定要删除该素材吗？')) return;
+    try {
+      const res = await fetch(`/api/projects/${projectInfo?.id}/materials/${materialId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setProjectMaterials(prev => prev.filter(m => m.id !== materialId));
+    } catch (err: any) {
+      alert('删除失败: ' + err.message);
+    }
+  };
+
+  // Handle Project Delete
+  const handleDeleteProject = async (projectId: string, projectName: string) => {
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId);
+    if (!confirm(`确定要删除项目「${projectName}」吗？\n该项目的所有素材、文档、报告都将被删除，无法恢复。`)) return;
+
+    if (isUUID) {
+      try {
+        const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+      } catch (err: any) {
+        alert('删除失败: ' + err.message);
+        return;
+      }
+    }
+
+    // Reload from backend to get updated list
+    fetch('/api/projects')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.projects) {
+          const updatedProjects = data.projects.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description || '',
+            category: 'river' as Category,
+          }));
+          setProjects(updatedProjects);
+          // If deleted project was selected, select first remaining
+          if (projectInfo?.id === projectId) {
+            setProjectInfo(updatedProjects.length > 0 ? updatedProjects[0] : null);
+          }
+        }
+      })
+      .catch(() => {});
+  };
+
+  // Load project materials when project changes
+  useEffect(() => {
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectInfo?.id || '');
+    if (!isUUID || !projectInfo?.id) {
+      setProjectMaterials([]);
+      return;
+    }
+    fetch(`/api/projects/${projectInfo.id}/materials/`)
+      .then(r => r.json())
+      .then(data => {
+        setProjectMaterials((data.materials || []).map((m: any) => ({
+          id: m.id,
+          name: m.title || m.filename,
+          size: m.size ? (m.size / 1024 / 1024).toFixed(1) + 'MB' : '',
+          page_count: m.page_count,
+        })));
+      })
+      .catch(() => setProjectMaterials([]));
+  }, [projectInfo?.id]);
+
   // Handle File Upload
   const [uploadCategory, setUploadCategory] = useState<'planning' | 'spec' | 'case'>('planning');
   const [isUploading, setIsUploading] = useState(false);
@@ -500,6 +706,14 @@ export default function App() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // 限制100MB以上文件
+    const MAX_SIZE = 100 * 1024 * 1024;  // 100MB
+    if (file.size > MAX_SIZE) {
+      alert(`文件过大（${(file.size/1024/1024).toFixed(1)}MB），最大支持 100MB`);
+      setIsUploading(false);
+      return;
+    }
 
     setIsUploading(true);
     setUploadError(null);
@@ -902,30 +1116,39 @@ export default function App() {
                     </header>
                     <div className="p-6 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
                        {projects.map((p) => (
-                         <div 
-                           key={p.id} 
+                         <div
+                           key={p.id}
                            onClick={() => {
                              setProjectInfo(p);
                              setShowProjects(false);
-                             setMessages(prev => [...prev, { 
-                               id: Date.now().toString(), 
-                               role: 'assistant', 
-                               content: `📂 **已成功切换至项目：${p.name}**\n\n${p.description || ""}` 
+                             setMessages(prev => [...prev, {
+                               id: Date.now().toString(),
+                               role: 'assistant',
+                               content: `📂 **已成功切换至项目：${p.name}**\n\n${p.description || ""}`
                              }]);
                            }}
                            className={cn(
                              "p-4 bg-[#141414] border rounded-xl flex items-center justify-between group hover:border-blue-500/30 transition-all cursor-pointer",
-                             projectInfo.id === p.id ? "border-blue-500" : "border-[#262626]"
+                             projectInfo?.id === p.id ? "border-blue-500" : "border-[#262626]"
                            )}
                          >
                             <div className="flex items-center gap-3">
-                               <Folder className={cn("w-4 h-4", projectInfo.id === p.id ? "text-blue-500" : "text-slate-600")} />
+                               <Folder className={cn("w-4 h-4", projectInfo?.id === p.id ? "text-blue-500" : "text-slate-600")} />
                                <div className="flex flex-col gap-0.5">
-                                 <span className={cn("text-xs transition-colors", projectInfo.id === p.id ? "text-white font-bold" : "text-slate-200")}>{p.name}</span>
+                                 <span className={cn("text-xs transition-colors", projectInfo?.id === p.id ? "text-white font-bold" : "text-slate-200")}>{p.name}</span>
                                  <span className="text-[10px] text-slate-600 truncate max-w-[140px]">{p.description}</span>
                                </div>
                             </div>
-                            <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-blue-500 transition-colors" />
+                            <div className="flex items-center gap-2 shrink-0">
+                               <button
+                                 onClick={(e) => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
+                                 className="p-1 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded hover:bg-red-600/10"
+                                 title="删除项目"
+                               >
+                                 <Trash2 className="w-3.5 h-3.5" />
+                               </button>
+                               <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-blue-500 transition-colors" />
+                            </div>
                          </div>
                        ))}
                     </div>
@@ -1440,14 +1663,14 @@ export default function App() {
                      </span>
                   </div>
                   <nav className="flex gap-1">
-                     {['报告预览', 'CAD模式', '结构核算'].map((tab, i) => (
-                       <button 
-                        key={tab} 
-                        onClick={() => setActiveArtifact(i === 0 ? 'report' : i === 1 ? 'drawing' : 'analysis')}
+                     {['报告预览', '素材库', 'CAD模式', '结构核算'].map((tab, i) => (
+                       <button
+                        key={tab}
+                        onClick={() => setActiveArtifact(i === 0 ? 'report' : i === 1 ? 'material' : i === 2 ? 'drawing' : 'analysis')}
                         className={cn(
                           "px-4 py-1.5 rounded-lg text-xs font-medium transition-all",
-                          ((activeArtifact === 'report' && i === 0) || (activeArtifact === 'drawing' && i === 1) || (activeArtifact === 'analysis' && i === 2))
-                            ? "bg-[#1A1A1A] text-blue-500" 
+                          ((activeArtifact === 'report' && i === 0) || (activeArtifact === 'material' && i === 1) || (activeArtifact === 'drawing' && i === 2) || (activeArtifact === 'analysis' && i === 3))
+                            ? "bg-[#1A1A1A] text-blue-500"
                             : "text-slate-500 hover:text-slate-300"
                         )}
                        >
@@ -1536,14 +1759,21 @@ export default function App() {
 
                <AnimatePresence mode="wait">
                   {activeArtifact === 'report' && (
-                    <motion.div 
+                    <motion.div
                       key="report"
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -20 }}
                       className="max-w-[850px] mx-auto artifact-stage p-16 min-h-[1100px]"
                     >
-                        <div className="space-y-12 leading-loose text-slate-300">
+                        {reportContent ? (
+                          // 动态渲染生成的报告内容
+                          <div className="prose prose-invert prose-slate max-w-none">
+                            <Markdown>{reportContent}</Markdown>
+                          </div>
+                        ) : (
+                          // 静态模板内容（初始状态）
+                          <div className="space-y-12 leading-loose text-slate-300">
                            <div className="text-center space-y-4 pb-12 border-b border-[#262626]">
                               <h1 className="text-3xl font-bold text-white tracking-tight">
                                 {currentCategory === 'consulting' && "水务咨询项目技术报告"}
@@ -1605,6 +1835,81 @@ export default function App() {
                               </div>
                            </section>
                         </div>
+                        )}
+                    </motion.div>
+                  )}
+
+                  {activeArtifact === 'material' && (
+                    <motion.div
+                      key="material"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      className="max-w-[900px] mx-auto artifact-stage p-16 min-h-[900px]"
+                    >
+                      <div className="flex items-center justify-between mb-8">
+                        <div>
+                          <h3 className="text-sm font-bold text-white">项目素材库</h3>
+                          <p className="text-[11px] text-slate-600 mt-0.5">上传项目相关文档，AI 将在生成报告时自动参考</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            ref={materialFileInputRef}
+                            type="file"
+                            accept=".pdf"
+                            className="hidden"
+                            onChange={handleMaterialUpload}
+                          />
+                          <button
+                            onClick={() => materialFileInputRef.current?.click()}
+                            disabled={isMaterialUploading || !projectInfo?.id}
+                            className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg disabled:opacity-50 flex items-center gap-2"
+                          >
+                            <Plus className="w-3 h-3" />
+                            {isMaterialUploading ? materialUploadProgress || '处理中...' : '上传素材'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {materialUploadProgress && !isMaterialUploading && (
+                        <div className="bg-blue-600/10 border border-blue-600/20 rounded-lg p-3 mb-4">
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
+                            <span className="text-xs text-blue-300">{materialUploadProgress}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {projectMaterials.length === 0 ? (
+                        <div className="text-center py-16 border border-dashed border-[#262626] rounded-xl">
+                          <Database className="w-10 h-10 text-slate-700 mx-auto mb-3" />
+                          <p className="text-xs text-slate-600">暂无项目素材</p>
+                          <p className="text-[10px] text-slate-700 mt-1">上传勘察报告、设计参数、水文数据等 PDF 文件</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {projectMaterials.map(m => (
+                            <div key={m.id} className="flex items-center justify-between p-4 bg-[#141414] border border-[#262626] rounded-lg group hover:border-blue-500/30 transition-all">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-blue-600/10 rounded-lg flex items-center justify-center">
+                                  <FileText className="w-4 h-4 text-blue-500/50" />
+                                </div>
+                                <div>
+                                  <div className="text-xs text-white font-medium">{m.name}</div>
+                                  <div className="text-[10px] text-slate-600 mt-0.5">{m.size}{m.page_count ? ` · ${m.page_count}页` : ''}</div>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteMaterial(m.id)}
+                                className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-600/20 rounded text-slate-600 hover:text-red-400 transition-all"
+                                title="删除"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
@@ -1808,34 +2113,62 @@ export default function App() {
                       取消
                    </button>
                    <button
-                     onClick={() => {
+                     onClick={async () => {
                        const nameElem = document.getElementById('newProjectName') as HTMLInputElement;
                        const descElem = document.getElementById('newProjectDesc') as HTMLTextAreaElement;
                        const name = nameElem?.value || "未命名工程";
                        const desc = descElem?.value || "";
 
                        const categoryLabels = { consulting: '水务咨询', river: '河道设计', drainage: '给排水' };
+
+                       // Create via backend API
+                       const res = await fetch('/api/projects', {
+                         method: 'POST',
+                         headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify({ name, description: desc })
+                       });
+
+                       if (!res.ok) {
+                         const err = await res.json().catch(() => ({}));
+                         alert('创建失败: ' + (err.detail || `HTTP ${res.status}`));
+                         return;
+                       }
+
+                       const backendProj = await res.json();
                        const newProj = {
-                         id: Date.now().toString(),
-                         name,
-                         description: desc,
+                         id: backendProj.id,
+                         name: backendProj.name,
+                         description: backendProj.description || desc,
                          category: newProjectCategory
                        };
 
-                       setProjects(prev => [newProj, ...prev]);
+                       // Reload project list from backend
+                       const listRes = await fetch('/api/projects');
+                       if (listRes.ok) {
+                         const listData = await listRes.json();
+                         if (listData?.projects) {
+                           setProjects(listData.projects.map((p: any) => ({
+                             id: p.id,
+                             name: p.name,
+                             description: p.description || '',
+                             category: 'river' as Category,
+                           })));
+                         }
+                       }
+
                        setProjectInfo(newProj);
                        setCurrentCategory(newProjectCategory);
                        setSystemStatus('export');
+                       setShowNewProjectModal(false);
 
                        setTimeout(() => {
                           setMessages([{
                              id: Date.now().toString(),
                              role: 'assistant',
-                             content: `🚀 **项目 "${name}" 已成功创建**（${categoryLabels[newProjectCategory]}）。\n\n**项目背景**：${desc || "未提供"}\n\n所有设计模块现已关联至该项目。您可以开始下达指令。`
+                             content: `🚀 **项目 "${newProj.name}" 已成功创建**（${categoryLabels[newProjectCategory]}）。\n\n**项目背景**：${desc || "未提供"}\n\n所有设计模块现已关联至该项目。您可以开始下达指令。`
                           }]);
                           setSystemStatus('idle');
                           setActiveArtifact('none');
-                          setShowNewProjectModal(false);
                        }, 600);
                      }}
                      className="flex-[2] h-11 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold rounded-xl shadow-lg shadow-blue-600/10 transition-all active:scale-95"

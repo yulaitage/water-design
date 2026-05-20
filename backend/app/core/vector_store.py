@@ -134,27 +134,25 @@ class VectorStoreService:
         self, query: str, top_k: int = 5, project_type: Optional[str] = None
     ) -> List[dict]:
         query_embedding = await self.embed_text(query)
-        if not query_embedding:
+        if not query_embedding or len(query_embedding) < 100:
             return []
 
         try:
-            conditions = ["content_embedding IS NOT NULL"]
-            params: dict = {"query_embedding": str(query_embedding), "limit": top_k}
-
+            # Convert list to PostgreSQL vector format: [1,2,3] (same as database format)
+            embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+            params = {"limit": top_k}
             if project_type:
-                conditions.append("project_types @> ARRAY[:project_type]::varchar[]")
                 params["project_type"] = project_type
 
-            where_clause = " AND ".join(conditions)
-
-            sql = text(f"""
+            sql = text("""
                 SELECT id, name, code, chapter, section, content, project_types,
-                       1 - (content_embedding <=> :query_embedding::vector) as similarity
+                       1 - (content_embedding <=> cast(:embedding as vector)) as similarity
                 FROM specifications
-                WHERE {where_clause}
-                ORDER BY content_embedding <=> :query_embedding::vector
+                WHERE content_embedding IS NOT NULL
+                ORDER BY content_embedding <=> cast(:embedding as vector)
                 LIMIT :limit
             """)
+            params["embedding"] = embedding_str
 
             result = await self.db.execute(sql, params)
             rows = result.fetchall()
@@ -185,25 +183,22 @@ class VectorStoreService:
         self, query: str, top_k: int = 5, project_type: Optional[str] = None
     ) -> List[dict]:
         query_embedding = await self.embed_text(query)
-        if not query_embedding:
+        if not query_embedding or len(query_embedding) < 100:
             return []
 
         try:
-            conditions = ["summary_embedding IS NOT NULL"]
-            params: dict = {"query_embedding": str(query_embedding), "limit": top_k}
-
+            # Convert list to PostgreSQL vector format
+            embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+            params = {"limit": top_k, "embedding": embedding_str}
             if project_type:
-                conditions.append("project_type = :project_type")
                 params["project_type"] = project_type
 
-            where_clause = " AND ".join(conditions)
-
-            sql = text(f"""
+            sql = text("""
                 SELECT id, name, project_type, location, owner, summary, design_params,
-                       1 - (summary_embedding <=> :query_embedding::vector) as similarity
+                       1 - (summary_embedding <=> cast(:embedding as vector)) as similarity
                 FROM cases
-                WHERE {where_clause}
-                ORDER BY summary_embedding <=> :query_embedding::vector
+                WHERE summary_embedding IS NOT NULL
+                ORDER BY summary_embedding <=> cast(:embedding as vector)
                 LIMIT :limit
             """)
 
@@ -248,25 +243,22 @@ class VectorStoreService:
         self, query: str, top_k: int = 10, project_type: Optional[str] = None
     ) -> List[dict]:
         query_embedding = await self.embed_text(query)
-        if not query_embedding:
+        if not query_embedding or len(query_embedding) < 100:
             return []
 
         try:
-            conditions = ["content_embedding IS NOT NULL"]
-            params: dict = {"query_embedding": str(query_embedding), "limit": top_k}
-
+            # Convert list to PostgreSQL vector format
+            embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+            params = {"limit": top_k, "embedding": embedding_str}
             if project_type:
-                conditions.append("project_types @> ARRAY[:project_type]::varchar[]")
                 params["project_type"] = project_type
 
-            where_clause = " AND ".join(conditions)
-
-            sql = text(f"""
+            sql = text("""
                 SELECT id, title, category, content, source_chapter, tags, project_types,
-                       1 - (content_embedding <=> :query_embedding::vector) as similarity
+                       1 - (content_embedding <=> cast(:embedding as vector)) as similarity
                 FROM wiki_items
-                WHERE {where_clause}
-                ORDER BY content_embedding <=> :query_embedding::vector
+                WHERE content_embedding IS NOT NULL
+                ORDER BY content_embedding <=> cast(:embedding as vector)
                 LIMIT :limit
             """)
 
@@ -358,17 +350,16 @@ class VectorStoreService:
         if has_embeddings:
             try:
                 query_embedding = await self.embed_text(query)
-                if query_embedding:
-                    vector_conditions = ["text_embedding IS NOT NULL"] + conditions
-                    vector_where = " AND ".join(vector_conditions)
-                    params["query_embedding"] = str(query_embedding)
+                if query_embedding and len(query_embedding) >= 100:
+                    embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+                    params["embedding"] = embedding_str
 
-                    sql = text(f"""
+                    sql = text("""
                         SELECT id, filename, title, category, project_type, full_text,
-                               1 - (text_embedding <=> :query_embedding::vector) as similarity
+                               1 - (text_embedding <=> cast(:embedding as vector)) as similarity
                         FROM documents
-                        WHERE {vector_where}
-                        ORDER BY text_embedding <=> :query_embedding::vector
+                        WHERE text_embedding IS NOT NULL
+                        ORDER BY text_embedding <=> cast(:embedding as vector)
                         LIMIT :limit
                     """)
 
@@ -434,21 +425,20 @@ class VectorStoreService:
         params["category"] = "case"
 
         query_embedding = await self.embed_text(query)
-        if query_embedding:
+        if query_embedding and len(query_embedding) >= 100:
             try:
-                vector_conditions = ["dc.embedding IS NOT NULL"] + conditions
-                params["query_embedding"] = str(query_embedding)
-                where_clause = " AND ".join(vector_conditions)
+                embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+                params["embedding"] = embedding_str
 
-                sql = text(f"""
+                sql = text("""
                     SELECT dc.id, dc.document_id, dc.chunk_index, dc.text, dc.page, dc.chunk_type,
                            dc.image_path, dc.image_description,
                            d.filename, d.title as doc_title,
-                           1 - (dc.embedding <=> :query_embedding::vector) as similarity
+                           1 - (dc.embedding <=> cast(:embedding as vector)) as similarity
                     FROM document_chunks dc
                     JOIN documents d ON dc.document_id = d.id
-                    WHERE {where_clause}
-                    ORDER BY dc.embedding <=> :query_embedding::vector
+                    WHERE dc.embedding IS NOT NULL AND d.category = :category
+                    ORDER BY dc.embedding <=> cast(:embedding as vector)
                     LIMIT :limit
                 """)
 
@@ -513,6 +503,373 @@ class VectorStoreService:
                 "doc_title": row.doc_title,
                 "similarity": float(row.similarity),
                 "source": "document_chunk",
+            }
+            for row in rows
+        ]
+
+    async def search_project_materials(
+        self, query: str, project_id: uuid.UUID, top_k: int = 10
+    ) -> List[dict]:
+        params: dict = {"query": f"%{query}%", "project_id": str(project_id), "limit": top_k}
+
+        query_embedding = await self.embed_text(query)
+        results = []
+
+        if query_embedding and len(query_embedding) >= 100:
+            try:
+                embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+                params["embedding"] = embedding_str
+                sql = text("""
+                    SELECT id, filename, title, category, project_type, full_text,
+                           1 - (text_embedding <=> cast(:embedding as vector)) as similarity
+                    FROM documents
+                    WHERE project_id = :project_id AND category = 'material' AND text_embedding IS NOT NULL
+                    ORDER BY text_embedding <=> cast(:embedding as vector)
+                    LIMIT :limit
+                """)
+                result = await self.db.execute(sql, params)
+                rows = result.fetchall()
+                for row in rows:
+                    results.append({
+                        "id": str(row.id),
+                        "filename": row.filename,
+                        "title": row.title,
+                        "category": row.category,
+                        "content": row.full_text,
+                        "similarity": float(row.similarity),
+                        "source": "material",
+                    })
+
+                # 如果项目ID搜索没结果，搜索所有material类别文档
+                if not results:
+                    logger.warning("=== No materials found for project, searching all material docs ===")
+                    sql2 = text("""
+                        SELECT id, filename, title, category, project_type, full_text,
+                               1 - (text_embedding <=> cast(:embedding as vector)) as similarity
+                        FROM documents
+                        WHERE category = 'material' AND text_embedding IS NOT NULL
+                        ORDER BY text_embedding <=> cast(:embedding as vector)
+                        LIMIT :limit
+                    """)
+                    result2 = await self.db.execute(sql2, params)
+                    rows2 = result2.fetchall()
+                    for row in rows2:
+                        results.append({
+                            "id": str(row.id),
+                            "filename": row.filename,
+                            "title": row.title,
+                            "category": row.category,
+                            "content": row.full_text,
+                            "similarity": float(row.similarity),
+                            "source": "material",
+                        })
+            except Exception as e:
+                logger.warning("Vector material search failed, falling back to text: %s", e)
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+
+        # Text fallback
+        sql = text("""
+            SELECT id, filename, title, category, project_type, full_text,
+                   0.5 as similarity
+            FROM documents
+            WHERE project_id = :project_id AND category = 'material'
+                  AND (filename ILIKE :query OR title ILIKE :query OR full_text ILIKE :query)
+            ORDER BY created_at DESC
+            LIMIT :limit
+        """)
+        result = await self.db.execute(sql, params)
+        rows = result.fetchall()
+        for row in rows:
+            results.append({
+                "id": str(row.id),
+                "filename": row.filename,
+                "title": row.title,
+                "category": row.category,
+                "content": row.full_text,
+                "similarity": float(row.similarity),
+                "source": "material",
+            })
+
+        # 如果项目ID搜索没结果，搜索所有material类别文档
+        if len(results) < 3:
+            sql2 = text("""
+                SELECT id, filename, title, category, project_type, full_text,
+                       0.5 as similarity
+                FROM documents
+                WHERE category = 'material'
+                      AND (filename ILIKE :query OR title ILIKE :query OR full_text ILIKE :query)
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """)
+            result2 = await self.db.execute(sql2, params)
+            rows2 = result2.fetchall()
+            for row in rows2:
+                if not any(r["id"] == str(row.id) for r in results):
+                    results.append({
+                        "id": str(row.id),
+                        "filename": row.filename,
+                        "title": row.title,
+                        "category": row.category,
+                        "content": row.full_text,
+                        "similarity": float(row.similarity),
+                        "source": "material",
+                    })
+
+        return results
+
+    async def search_material_chunks(
+        self, query: str, project_id: uuid.UUID, top_k: int = 10
+    ) -> List[dict]:
+        params: dict = {"query": f"%{query}%", "project_id": str(project_id), "limit": top_k}
+
+        query_embedding = await self.embed_text(query)
+        if query_embedding and len(query_embedding) >= 100:
+            try:
+                embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+                params["embedding"] = embedding_str
+                sql = text("""
+                    SELECT dc.id, dc.document_id, dc.chunk_index, dc.text, dc.page, dc.chunk_type,
+                           dc.image_path, dc.image_description,
+                           d.filename, d.title as doc_title,
+                           1 - (dc.embedding <=> cast(:embedding as vector)) as similarity
+                    FROM document_chunks dc
+                    JOIN documents d ON dc.document_id = d.id
+                    WHERE d.project_id = :project_id AND d.category = 'material' AND dc.embedding IS NOT NULL
+                    ORDER BY dc.embedding <=> cast(:embedding as vector)
+                    LIMIT :limit
+                """)
+                result = await self.db.execute(sql, params)
+                rows = result.fetchall()
+                if rows:
+                    return [
+                        {
+                            "id": str(row.id),
+                            "document_id": str(row.document_id),
+                            "chunk_index": row.chunk_index,
+                            "text": row.text,
+                            "page": row.page,
+                            "chunk_type": row.chunk_type,
+                            "image_path": row.image_path,
+                            "image_description": row.image_description,
+                            "filename": row.filename,
+                            "doc_title": row.doc_title,
+                            "similarity": float(row.similarity),
+                            "source": "material_chunk",
+                        }
+                        for row in rows
+                    ]
+            except Exception as e:
+                logger.warning("Vector material chunk search failed, falling back to text: %s", e)
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+
+        sql = text("""
+            SELECT dc.id, dc.document_id, dc.chunk_index, dc.text, dc.page, dc.chunk_type,
+                   dc.image_path, dc.image_description,
+                   d.filename, d.title as doc_title,
+                   0.5 as similarity
+            FROM document_chunks dc
+            JOIN documents d ON dc.document_id = d.id
+            WHERE d.project_id = :project_id AND d.category = 'material'
+                  AND (dc.text ILIKE :query OR d.title ILIKE :query)
+            ORDER BY dc.chunk_index
+            LIMIT :limit
+        """)
+        result = await self.db.execute(sql, params)
+        rows = result.fetchall()
+        return [
+            {
+                "id": str(row.id),
+                "document_id": str(row.document_id),
+                "chunk_index": row.chunk_index,
+                "text": row.text,
+                "page": row.page,
+                "chunk_type": row.chunk_type,
+                "image_path": row.image_path,
+                "image_description": row.image_description,
+                "filename": row.filename,
+                "doc_title": row.doc_title,
+                "similarity": float(row.similarity),
+                "source": "material_chunk",
+            }
+            for row in rows
+        ]
+
+    async def search_all_chunks(
+        self, query: str, project_id: uuid.UUID, top_k: int = 30
+    ) -> List[dict]:
+        """搜索项目的所有素材块（包括material和case类别），不按category过滤
+
+        如果没有找到结果，会回退到搜索所有项目的文档块
+        """
+        params: dict = {"query": f"%{query}%", "project_id": str(project_id), "limit": top_k}
+
+        query_embedding = await self.embed_text(query)
+        results = []
+
+        if query_embedding and len(query_embedding) >= 100:
+            try:
+                embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
+                params["embedding"] = embedding_str
+                # 首先尝试按项目ID搜索
+                sql = text("""
+                    SELECT dc.id, dc.document_id, dc.chunk_index, dc.text, dc.page, dc.chunk_type,
+                           dc.image_path, dc.image_description,
+                           d.filename, d.title as doc_title, d.category,
+                           1 - (dc.embedding <=> cast(:embedding as vector)) as similarity
+                    FROM document_chunks dc
+                    JOIN documents d ON dc.document_id = d.id
+                    WHERE d.project_id = :project_id AND dc.embedding IS NOT NULL
+                    ORDER BY dc.embedding <=> cast(:embedding as vector)
+                    LIMIT :limit
+                """)
+                result = await self.db.execute(sql, params)
+                rows = result.fetchall()
+                for row in rows:
+                    results.append({
+                        "id": str(row.id),
+                        "document_id": str(row.document_id),
+                        "chunk_index": row.chunk_index,
+                        "text": row.text,
+                        "page": row.page,
+                        "chunk_type": row.chunk_type,
+                        "image_path": row.image_path,
+                        "image_description": row.image_description,
+                        "filename": row.filename,
+                        "doc_title": row.doc_title,
+                        "category": row.category,
+                        "similarity": float(row.similarity),
+                        "source": f"{row.category}_chunk",
+                    })
+
+                # 如果项目ID搜索没结果，搜索所有material类别文档
+                if not results:
+                    logger.warning("=== No chunks found for project, searching all material chunks ===")
+                    sql2 = text("""
+                        SELECT dc.id, dc.document_id, dc.chunk_index, dc.text, dc.page, dc.chunk_type,
+                               dc.image_path, dc.image_description,
+                               d.filename, d.title as doc_title, d.category,
+                               1 - (dc.embedding <=> cast(:embedding as vector)) as similarity
+                        FROM document_chunks dc
+                        JOIN documents d ON dc.document_id = d.id
+                        WHERE d.category IN ('material', 'case') AND dc.embedding IS NOT NULL
+                        ORDER BY dc.embedding <=> cast(:embedding as vector)
+                        LIMIT :limit
+                    """)
+                    result2 = await self.db.execute(sql2, params)
+                    rows2 = result2.fetchall()
+                    for row in rows2:
+                        results.append({
+                            "id": str(row.id),
+                            "document_id": str(row.document_id),
+                            "chunk_index": row.chunk_index,
+                            "text": row.text,
+                            "page": row.page,
+                            "chunk_type": row.chunk_type,
+                            "image_path": row.image_path,
+                            "image_description": row.image_description,
+                            "filename": row.filename,
+                            "doc_title": row.doc_title,
+                            "category": row.category,
+                            "similarity": float(row.similarity),
+                            "source": f"{row.category}_chunk",
+                        })
+                return results
+            except Exception as e:
+                logger.warning("Vector all chunks search failed: %s", e)
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+
+        # Fallback to text search - 先按项目搜索，再搜索所有
+        sql = text("""
+            SELECT dc.id, dc.document_id, dc.chunk_index, dc.text, dc.page, dc.chunk_type,
+                   dc.image_path, dc.image_description,
+                   d.filename, d.title as doc_title, d.category,
+                   0.5 as similarity
+            FROM document_chunks dc
+            JOIN documents d ON dc.document_id = d.id
+            WHERE d.project_id = :project_id
+                  AND (dc.text ILIKE :query OR d.title ILIKE :query OR d.filename ILIKE :query)
+            ORDER BY dc.chunk_index
+            LIMIT :limit
+        """)
+        result = await self.db.execute(sql, params)
+        rows = result.fetchall()
+        for row in rows:
+            results.append({
+                "id": str(row.id),
+                "document_id": str(row.document_id),
+                "chunk_index": row.chunk_index,
+                "text": row.text,
+                "page": row.page,
+                "chunk_type": row.chunk_type,
+                "image_path": row.image_path,
+                "image_description": row.image_description,
+                "filename": row.filename,
+                "doc_title": row.doc_title,
+                "category": row.category,
+                "similarity": float(row.similarity),
+                "source": f"{row.category}_chunk",
+            })
+
+        # 如果项目ID搜索没结果，搜索所有material/case类别文档
+        if not results:
+            logger.warning("=== No text chunks found for project, searching all material/case chunks ===")
+            sql2 = text("""
+                SELECT dc.id, dc.document_id, dc.chunk_index, dc.text, dc.page, dc.chunk_type,
+                       dc.image_path, dc.image_description,
+                       d.filename, d.title as doc_title, d.category,
+                       0.5 as similarity
+                FROM document_chunks dc
+                JOIN documents d ON dc.document_id = d.id
+                WHERE d.category IN ('material', 'case')
+                      AND (dc.text ILIKE :query OR d.title ILIKE :query OR d.filename ILIKE :query)
+                ORDER BY dc.chunk_index
+                LIMIT :limit
+            """)
+            result2 = await self.db.execute(sql2, params)
+            rows2 = result2.fetchall()
+            for row in rows2:
+                results.append({
+                    "id": str(row.id),
+                    "document_id": str(row.document_id),
+                    "chunk_index": row.chunk_index,
+                    "text": row.text,
+                    "page": row.page,
+                    "chunk_type": row.chunk_type,
+                    "image_path": row.image_path,
+                    "image_description": row.image_description,
+                    "filename": row.filename,
+                    "doc_title": row.doc_title,
+                    "category": row.category,
+                    "similarity": float(row.similarity),
+                    "source": f"{row.category}_chunk",
+                })
+
+        return results
+        result = await self.db.execute(sql, params)
+        rows = result.fetchall()
+        return [
+            {
+                "id": str(row.id),
+                "document_id": str(row.document_id),
+                "chunk_index": row.chunk_index,
+                "text": row.text,
+                "page": row.page,
+                "chunk_type": row.chunk_type,
+                "image_path": row.image_path,
+                "image_description": row.image_description,
+                "filename": row.filename,
+                "doc_title": row.doc_title,
+                "similarity": float(row.similarity),
+                "source": "material_chunk",
             }
             for row in rows
         ]

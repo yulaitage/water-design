@@ -81,6 +81,24 @@ class ReportService:
         result = await self.db.execute(stmt)
         return result.scalar() or 0
 
+    async def get_report_content(self, task_id: uuid.UUID) -> Optional[str]:
+        """获取报告的 Markdown 内容"""
+        task = await self._get_task(task_id)
+        if not task or not task.chapters:
+            return None
+        # 合并各章节为完整报告
+        # 优先使用CHAPTER_ORDER中存在的章节，保持原有顺序
+        chapter_order = self.CHAPTER_ORDER
+        parts = []
+        for name in chapter_order:
+            if name in task.chapters:
+                parts.append(f"## {name}\n\n{task.chapters[name]}")
+        # 如果没有找到任何章节（可能是旧格式数据），直接拼接所有chapters
+        if not parts:
+            for name, content in task.chapters.items():
+                parts.append(f"## {name}\n\n{content}")
+        return "\n\n".join(parts) if parts else None
+
     async def generate_report(
         self,
         task_id: uuid.UUID,
@@ -102,9 +120,10 @@ class ReportService:
             )
             await self._update_task_status(task, status="retrieving", progress=10)
 
-            # 检索规范和案例
-            specs, cases = await self._retrieve_knowledge(
-                project_info=project_info
+            # 检索规范、案例、项目素材
+            specs, cases, materials = await self._retrieve_knowledge(
+                project_info=project_info,
+                project_id=task.project_id
             )
 
             # 更新进度：开始生成
@@ -144,6 +163,7 @@ class ReportService:
                     chapter_num=chapter_num,
                     specs=specs,
                     cases=cases,
+                    materials=materials,
                     project_info=project_info
                 )
                 chapters[chapter_name] = content
@@ -194,6 +214,10 @@ class ReportService:
                 output_path=output_path
             )
 
+            # 更新任务的 chapters 字段（存储 Markdown 内容供前端获取）
+            task.chapters = chapters
+            await self.db.commit()
+
             return output_path
 
         except Exception as e:
@@ -201,9 +225,9 @@ class ReportService:
             await self._update_task_status(task, status="failed", error_message=str(e))
             raise GenerationFailedException(chapter=task.current_chapter or "未知", reason=str(e))
 
-    async def _retrieve_knowledge(self, project_info: ProjectInfo) -> tuple:
-        """检索知识库"""
-        specs, cases = [], []
+    async def _retrieve_knowledge(self, project_info: ProjectInfo, project_id: uuid.UUID) -> tuple:
+        """检索知识库（规范 -> 案例 -> 项目素材）"""
+        specs, cases, materials = [], [], []
 
         try:
             specs, cases = await self.retrieval_service.retrieve_for_chapter(
@@ -212,9 +236,20 @@ class ReportService:
                 location=project_info.location
             )
         except Exception as e:
-            logger.warning("Knowledge retrieval failed, continuing with empty results: %s", e)
+            logger.warning("Spec/case retrieval failed: %s", e)
 
-        return specs, cases
+        try:
+            from app.core.vector_store import VectorStoreService
+            vs = VectorStoreService(self.db)
+            materials = await vs.search_project_materials(
+                query=f"{project_info.description} {project_info.scale} 工程设计",
+                project_id=project_id,
+                top_k=10
+            )
+        except Exception as e:
+            logger.warning("Material retrieval failed: %s", e)
+
+        return specs, cases, materials
 
     def _infer_project_type(self, project_info: ProjectInfo) -> str:
         """从项目描述推断工程类型"""
@@ -233,6 +268,7 @@ class ReportService:
         chapter_num: str,
         specs: List[dict],
         cases: List[dict],
+        materials: List[dict],
         project_info: ProjectInfo
     ) -> str:
         """生成单个章节内容（使用 LLM）"""
@@ -245,6 +281,48 @@ class ReportService:
 
         specs_text = "\n".join([s["content"][:300] for s in specs[:3]]) if specs else "暂无参考规范"
         cases_text = "\n".join([c.get("summary", c.get("name", ""))[:200] for c in cases[:2]]) if cases else "暂无参考案例"
+        materials_text = "\n".join([
+            f"- [{m.get('filename', '素材')}] {m.get('content', '')[:300]}..."
+            for m in materials[:3]
+        ]) if materials else "暂无项目素材"
+
+        # 提取素材中的图片信息用于插图
+        figures_text = ""
+        for m in materials[:3]:
+            if m.get('source') == 'material_chunk' and m.get('image_path'):
+                desc = m.get('image_description', '相关图片')
+                img_rel = m['image_path'].replace("\\", "/")
+                if img_rel.startswith("uploads/"):
+                    img_rel = img_rel[len("uploads/"):]
+                figures_text += f"\n- [{desc}]({img_rel})"
+
+        for c in cases[:2]:
+            if c.get('source') in ('case', 'document_chunk') and c.get('image_path'):
+                desc = c.get('image_description', c.get('filename', '相关图片'))
+                img_rel = c['image_path'].replace("\\", "/")
+                if img_rel.startswith("uploads/"):
+                    img_rel = img_rel[len("uploads/"):]
+                figures_text += f"\n- [{desc}]({img_rel})"
+
+        # 检索素材图片块
+        try:
+            from app.core.vector_store import VectorStoreService
+            vs = VectorStoreService(self.db)
+            proj_id = _current_project_id.get() if _current_project_id else None
+            if proj_id:
+                fig_chunks = await vs.search_material_chunks(
+                    query=f"{project_info.description} 平面 断面 布置 图 设计",
+                    project_id=proj_id, top_k=5
+                )
+                for fc in fig_chunks:
+                    if fc.get('image_path') and fc.get('chunk_type') == 'figure':
+                        desc = fc.get('image_description', '工程图片')
+                        img_rel = fc['image_path'].replace("\\", "/")
+                        if img_rel.startswith("uploads/"):
+                            img_rel = img_rel[len("uploads/"):]
+                        figures_text += f"\n- [{desc}]({img_rel})"
+        except Exception:
+            pass
 
         terrain_info = ""
         cost_data = ""
@@ -280,6 +358,8 @@ class ReportService:
             scale=project_info.scale,
             specs_text=specs_text,
             cases_text=cases_text,
+            materials_text=materials_text,
+            figures_text=figures_text or "暂无插图",
             terrain_info=terrain_info,
             cost_data=cost_data,
         )
@@ -429,8 +509,9 @@ class ReportService:
     async def interactive_retrieve_knowledge(
         self,
         task_id: uuid.UUID,
-        project_info: ProjectInfo
-    ) -> tuple[List[dict], List[dict]]:
+        project_info: ProjectInfo,
+        project_id: uuid.UUID
+    ) -> tuple[List[dict], List[dict], List[dict]]:
         """交互式检索知识库（带进度）"""
         interactive_task_queue.update_phase(task_id, ReportPhase.RETRIEVING)
 
@@ -481,11 +562,35 @@ class ReportService:
             "step": f"检索到 {len(cases)} 个相似案例"
         }
 
+        # 检索项目素材
+        yield {
+            "type": "retrieving_progress",
+            "progress": 85,
+            "step": "正在检索项目素材库..."
+        }
+
+        materials = []
+        try:
+            materials = await vs_service.search_project_materials(
+                query=f"{project_info.description} {project_info.scale} 工程设计",
+                project_id=project_id,
+                top_k=10
+            )
+        except Exception as e:
+            logger.warning("Material retrieval failed: %s", e)
+
+        yield {
+            "type": "retrieving_progress",
+            "progress": 95,
+            "step": f"检索到 {len(materials)} 份项目素材"
+        }
+
         # 更新任务队列
         task = interactive_task_queue.get_task(task_id)
         if task:
             task.retrieved_specs = specs
             task.retrieved_cases = cases
+            task.retrieved_materials = materials
 
         yield {
             "type": "retrieving_progress",
@@ -499,6 +604,7 @@ class ReportService:
         chapter_index: int,
         specs: List[dict],
         cases: List[dict],
+        materials: List[dict],
         project_info: ProjectInfo,
         revision_note: Optional[str] = None
     ) -> AsyncGenerator[dict, None]:
@@ -528,6 +634,7 @@ class ReportService:
             chapter_name=chapter_name,
             specs=specs,
             cases=cases,
+            materials=materials,
             project_info=project_info,
             revision_note=revision_note
         )
@@ -641,6 +748,7 @@ class ReportService:
         chapter_name: str,
         specs: List[dict],
         cases: List[dict],
+        materials: List[dict],
         project_info: ProjectInfo,
         revision_note: Optional[str] = None
     ) -> str:
@@ -658,6 +766,49 @@ class ReportService:
             f"- {c.get('name', '案例')}: {c.get('summary', c.get('description', ''))[:200]}..."
             for c in cases[:3]
         ]) if cases else "暂无相似案例"
+
+        materials_text = "\n".join([
+            f"- [{m.get('filename', '素材')}] {m.get('content', '')[:300]}..."
+            for m in materials[:3]
+        ]) if materials else "暂无项目素材"
+
+        # 提取素材中的图片信息用于插图
+        figures_text = ""
+        for m in materials[:3]:
+            if m.get('source') == 'material_chunk' and m.get('image_path'):
+                desc = m.get('image_description', '相关图片')
+                img_rel = m['image_path'].replace("\\", "/")
+                if img_rel.startswith("uploads/"):
+                    img_rel = img_rel[len("uploads/"):]
+                figures_text += f"\n- [{desc}]({img_rel})"
+
+        for c in cases[:2]:
+            if c.get('source') in ('case', 'document_chunk') and c.get('image_path'):
+                desc = c.get('image_description', c.get('filename', '相关图片'))
+                img_rel = c['image_path'].replace("\\", "/")
+                if img_rel.startswith("uploads/"):
+                    img_rel = img_rel[len("uploads/"):]
+                figures_text += f"\n- [{desc}]({img_rel})"
+
+        # 检索素材图片块
+        try:
+            from app.core.vector_store import VectorStoreService
+            vs = VectorStoreService(self.db)
+            proj_id = _current_project_id.get() if _current_project_id else None
+            if proj_id:
+                fig_chunks = await vs.search_material_chunks(
+                    query=f"{project_info.description} 平面 断面 布置 图 设计",
+                    project_id=proj_id, top_k=5
+                )
+                for fc in fig_chunks:
+                    if fc.get('image_path') and fc.get('chunk_type') == 'figure':
+                        desc = fc.get('image_description', '工程图片')
+                        img_rel = fc['image_path'].replace("\\", "/")
+                        if img_rel.startswith("uploads/"):
+                            img_rel = img_rel[len("uploads/"):]
+                        figures_text += f"\n- [{desc}]({img_rel})"
+        except Exception:
+            pass
 
         terrain_info = ""
         cost_data = ""
@@ -702,8 +853,14 @@ class ReportService:
 【参考规范】
 {specs_text}
 
-【相似案例】
+【相似案例】结构与篇幅参考：
 {cases_text}
+
+【项目素材】
+{materials_text}
+
+【可用插图】（在描述工程布置时使用 ![描述](图片路径) 插入图片）：
+{figures_text or "暂无插图"}
 
 【地形信息】
 {terrain_info or "暂无地形数据"}
@@ -712,7 +869,7 @@ class ReportService:
 {cost_data or "暂无造价数据"}
 
 【章节要求】
-{template or f"请生成{chapter_name}的完整内容，包括必要的背景介绍、技术分析和建议。"}
+{template or f"请生成{chapter_name}的完整内容，包括必要的背景介绍、技术分析和建议。在描述工程布置时，请在合适位置使用 ![图](图片路径) 格式插入相关工程图片。"}
 {revision_context}
 
 请生成专业的技术报告内容，使用Markdown格式，确保内容准确、完整、可操作。
@@ -735,6 +892,7 @@ class ReportService:
             ("image", ["如图", "见附图", "示意图", "布置图"], "请提供相关工程图纸或示意图"),
             ("specification", ["根据规范", "按照标准", "按GB"], "请提供相关规范的具体条文"),
             ("case", ["参考案例", "类似工程", "工程实例"], "请提供一个相似的工程案例作为参考"),
+            ("material", ["待补充", "数据待定", "详见附件", "需提供", "未获取"], "该章节内容存在待补充数据，请上传相关项目资料（如勘察报告、水文数据、设计图纸等）"),
         ]
 
         content_lower = content.lower()

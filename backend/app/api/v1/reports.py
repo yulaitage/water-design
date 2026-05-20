@@ -84,6 +84,24 @@ async def get_report_status(
     )
 
 
+@router.get("/{task_id}/content")
+async def get_report_content(
+    project_id: uuid.UUID = Path(...),
+    task_id: uuid.UUID = Path(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取报告 Markdown 内容"""
+    from app.services.report_service import ReportService
+
+    service = ReportService(db)
+    content = await service.get_report_content(task_id)
+
+    if not content:
+        raise HTTPException(status_code=404, detail="报告不存在或尚未生成")
+
+    return {"content": content, "task_id": str(task_id)}
+
+
 @router.get("/{task_id}/download")
 async def download_report(
     project_id: uuid.UUID = Path(...),

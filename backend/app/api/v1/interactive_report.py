@@ -61,8 +61,12 @@ async def stream_chapter(
 
     async def event_generator():
         try:
+            # 获取项目ID
+            itask = interactive_task_queue.get_task(task_id)
+            proj_id = itask.project_id if itask else None
+
             # 第一阶段：检索知识库
-            specs, cases = [], []
+            specs, cases, materials = [], [], []
 
             async for retrieval_event in service.interactive_retrieve_knowledge(task_id, ProjectInfo(
                 name="项目",
@@ -70,15 +74,15 @@ async def stream_chapter(
                 owner="",
                 scale="",
                 description=""
-            )):
+            ), proj_id):
                 yield f"data: {json.dumps(retrieval_event, ensure_ascii=False)}\n\n"
 
-                # 解析检索结果
                 if retrieval_event.get("type") == "retrieving_progress" and retrieval_event.get("progress", 0) == 100:
                     itask = interactive_task_queue.get_task(task_id)
                     if itask:
                         specs = itask.retrieved_specs
                         cases = itask.retrieved_cases
+                        materials = getattr(itask, "retrieved_materials", [])
 
             # 第二阶段：按章节生成
             current_chapter_index = itask.current_chapter_index if itask else 0
@@ -113,6 +117,7 @@ async def stream_chapter(
                     chapter_index=current_chapter_index,
                     specs=specs,
                     cases=cases,
+                    materials=materials,
                     project_info=project_info,
                     revision_note=revision_note
                 ):

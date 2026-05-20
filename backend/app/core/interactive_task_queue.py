@@ -42,6 +42,11 @@ class InteractiveReportTask:
     error: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
 
+    # 检索结果
+    retrieved_specs: List[dict] = field(default_factory=list)
+    retrieved_cases: List[dict] = field(default_factory=list)
+    retrieved_materials: List[dict] = field(default_factory=list)
+
     # 事件用于暂停/继续
     pause_event: asyncio.Event = field(default_factory=asyncio.Event)
     continue_event: asyncio.Event = field(default_factory=asyncio.Event)

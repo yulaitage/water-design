@@ -36,10 +36,13 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """对话响应"""
     conversation_id: UUID
-    message: str
-    intent: str
+    message: str  # 对话消息（讨论内容，不含报告正文）
+    intent: str    # 意图标签，如 "REPORT_GENERATE"
     tool_calls: Optional[List[Dict[str, Any]]] = None
     context: Optional[Dict[str, Any]] = None
+    # 报告相关字段
+    report_id: Optional[str] = None   # 报告任务ID
+    report_content: Optional[str] = None  # 报告内容（Markdown）
 
 
 class ConversationHistoryResponse(BaseModel):

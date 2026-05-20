@@ -93,5 +93,24 @@ async def delete_project(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
+    from sqlalchemy import text
+
+    pid_str = str(project_id)
+
+    # 删除文档的所有 chunk（无 FK 级联）
+    await db.execute(text("DELETE FROM document_chunks WHERE document_id IN (SELECT id FROM documents WHERE project_id = :pid)"), {"pid": pid_str})
+    # 删除文档的图片记录
+    await db.execute(text("DELETE FROM document_images WHERE document_id IN (SELECT id FROM documents WHERE project_id = :pid)"), {"pid": pid_str})
+    # 删除项目文档
+    await db.execute(text("DELETE FROM documents WHERE project_id = :pid"), {"pid": pid_str})
+    # 删除项目的报告任务修订记录
+    await db.execute(text("DELETE FROM report_revisions WHERE report_task_id IN (SELECT id FROM report_tasks WHERE project_id = :pid)"), {"pid": pid_str})
+    # 删除项目的报告任务
+    await db.execute(text("DELETE FROM report_tasks WHERE project_id = :pid"), {"pid": pid_str})
+    # 删除项目的费用估算记录
+    await db.execute(text("DELETE FROM cost_estimates WHERE project_id = :pid"), {"pid": pid_str})
+    # 删除项目的对话记录
+    await db.execute(text("DELETE FROM conversations WHERE project_id = :pid"), {"pid": pid_str})
+
     await db.delete(project)
     await db.commit()
